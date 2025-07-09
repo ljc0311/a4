@@ -28,6 +28,12 @@ edge-tts>=6.1.0
 # 数据处理
 pandas>=1.4.0
 
+# 系统监控
+psutil>=5.9.0
+
+# 加密和安全
+cryptography>=3.4.0
+
 # 工具库
 tqdm>=4.64.0
 colorama>=0.4.5
@@ -54,9 +60,6 @@ opencv-python>=4.5.0
 
 # 配置文件处理 (可选，如需YAML支持)
 # pyyaml>=6.0
-
-# 加密和安全 (可选，如需加密功能)
-# cryptography>=3.4.0
 
 # 文件监控 (可选，如需文件变化监控)
 # watchdog>=2.1.0
@@ -93,7 +96,7 @@ opencv-python>=4.5.0
 # pip install -r requirements.txt
 
 # 如需可选功能，请根据需要单独安装:
-# pip install jsonschema pyyaml cryptography watchdog
+# pip install jsonschema pyyaml watchdog
 # pip install opencv-python librosa ffmpeg-python
 
 # 开发环境安装:

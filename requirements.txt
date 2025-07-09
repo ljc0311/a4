@@ -1,0 +1,116 @@
+# AI视频生成器 - 完整依赖列表
+# 基于实际代码分析和运行时需求的完整依赖集合
+
+# ==================== 核心依赖 (必需) ====================
+
+# 核心GUI框架
+PyQt5>=5.15.0
+PyQtWebEngine>=5.15.0
+
+# 网络请求
+requests>=2.28.0
+aiohttp>=3.8.0
+aiofiles>=0.8.0
+
+# 图像处理
+Pillow>=9.0.0
+numpy>=1.21.0
+
+# 视频处理
+moviepy>=1.0.3
+
+# 音频处理
+pydub>=0.25.1
+
+# TTS引擎依赖
+edge-tts>=6.1.0
+
+# 数据处理
+pandas>=1.4.0
+
+# 工具库
+tqdm>=4.64.0
+colorama>=0.4.5
+
+# 中文文本处理 (运行时必需)
+jieba>=0.42.1
+
+# HTML解析 (运行时必需)
+beautifulsoup4>=4.12.0
+
+# 音频处理增强 (推荐安装)
+mutagen>=1.46.0
+
+# 视频处理增强 (推荐安装)
+opencv-python>=4.5.0
+
+# ==================== 可选依赖 (按需安装) ====================
+
+# JSON处理增强 (可选)
+# jsonschema>=4.0.0
+
+# 时间处理增强 (可选，pandas已包含python-dateutil)
+# python-dateutil>=2.8.0
+
+# 配置文件处理 (可选，如需YAML支持)
+# pyyaml>=6.0
+
+# 加密和安全 (可选，如需加密功能)
+# cryptography>=3.4.0
+
+# 文件监控 (可选，如需文件变化监控)
+# watchdog>=2.1.0
+
+# HTTP客户端增强 (可选，requests已足够)
+# httpx>=0.24.0
+
+# 图像格式支持增强 (可选，如需OpenCV功能)
+# opencv-python>=4.5.0
+
+# 音频格式支持增强 (可选，如需高级音频处理)
+# librosa>=0.9.0
+
+# 视频编解码支持 (可选，如需FFmpeg功能)
+# ffmpeg-python>=0.2.0
+
+# ==================== 开发工具 (开发时可选) ====================
+
+# 测试框架
+# pytest>=7.1.0
+# pytest-asyncio>=0.21.0
+
+# 代码格式化
+# black>=22.6.0
+# isort>=5.10.0
+
+# 代码检查
+# flake8>=5.0.0
+# mypy>=1.0.0
+
+# ==================== 安装说明 ====================
+
+# 基础安装 (仅核心功能):
+# pip install -r requirements.txt
+
+# 如需可选功能，请根据需要单独安装:
+# pip install jsonschema pyyaml cryptography watchdog
+# pip install opencv-python librosa ffmpeg-python
+
+# 开发环境安装:
+# pip install pytest black flake8 mypy
+
+# ==================== 注意事项 ====================
+# 1. 本项目主要依赖PyQt5进行GUI开发
+# 2. 网络功能用于调用各种AI服务API
+# 3. 图像处理用于预览和基本操作
+# 4. 视频和音频处理功能为核心模块
+# 5. 大部分AI功能通过API调用实现，无需本地AI库
+# 6. jieba和beautifulsoup4是运行时必需的依赖
+# 7. 可选依赖根据具体功能模块按需安装
+# 8. 如遇到缺失模块错误，请根据错误信息安装对应依赖
+
+# ==================== 系统要求 ====================
+# Python: 3.8+
+# 操作系统: Windows 10+, macOS 10.14+, Linux (Ubuntu 18.04+)
+# 内存: 建议4GB以上
+# 硬盘: 建议2GB以上可用空间

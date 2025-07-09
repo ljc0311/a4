@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Output files
+output/
+backups/
+auto_save/
+
+# Configuration files with sensitive data
+config/app_settings.json
+config/baidu_translate_config.py
+config/llm_config.json
+config/tts_config.json
+config/video_generation_config.py
+config/image_generation_config.py
+
+# Cache
+*_cache/
+cache/
+
+# FFmpeg (if it's a large binary)
+ffmpeg/bin/
+ffmpeg/doc/
+
+# Sound library (if files are large)
+sound_library/
+
+# Test results
+*.json
+test_*.py
+
+# System files
+*.pid
+*.seed
+*.pid.lock

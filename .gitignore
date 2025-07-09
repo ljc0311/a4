@@ -65,6 +65,24 @@ config/llm_config.json
 config/tts_config.json
 config/video_generation_config.py
 config/image_generation_config.py
+config/.encryption_key
+config/secure_config.enc
+config/config.json
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+.env.shared
+.env.secret
+
+# API keys and sensitive data
+**/api_key*
+**/secret*
+**/*_key*
+**/*_token*
+**/*_password*
 
 # Cache
 *_cache/

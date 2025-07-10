@@ -5,6 +5,7 @@ LLM服务
 统一的大语言模型服务，支持多种提供商和模型
 """
 
+import asyncio
 import aiohttp
 from typing import Dict, Optional
 
@@ -159,7 +160,7 @@ class LLMService(ServiceBase):
             'Authorization': f'Bearer {api_config.api_key}',
             'Content-Type': 'application/json'
         }
-        
+
         data = {
             'model': api_config.model_name or 'deepseek-chat',
             'messages': [
@@ -168,23 +169,61 @@ class LLMService(ServiceBase):
             'max_tokens': max_tokens,
             'temperature': temperature
         }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{api_config.api_url}/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=aiohttp.ClientTimeout(total=api_config.timeout)
-            ) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    return {
-                        'content': result['choices'][0]['message']['content'],
-                        'usage': result.get('usage', {})
-                    }
-                else:
-                    error_text = await response.text()
-                    raise Exception(f"API请求失败 (状态码: {response.status}): {error_text}")
+
+        # 🔧 修复：检查URL是否已经包含endpoint，避免重复添加
+        api_url = api_config.api_url
+        if not api_url.endswith('/chat/completions'):
+            api_url = f"{api_url.rstrip('/')}/chat/completions"
+
+        try:
+            # 🔧 增加超时时间，DeepSeek有时响应较慢
+            timeout = max(api_config.timeout, 60)  # 至少60秒
+            connector = aiohttp.TCPConnector(use_dns_cache=False)
+
+            # 🔧 添加：检测是否需要代理（某些网络环境下DeepSeek也可能需要代理）
+            proxy_url = None
+            try:
+                # 快速测试直连是否可用
+                test_connector = aiohttp.TCPConnector(use_dns_cache=False)
+                async with aiohttp.ClientSession(connector=test_connector) as test_session:
+                    async with test_session.get(
+                        "https://api.deepseek.com",
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as test_response:
+                        if test_response.status not in [200, 404]:  # 404也表示能连通
+                            # 直连有问题，尝试代理
+                            proxy_url = "http://127.0.0.1:12334"
+            except:
+                # 直连失败，尝试代理
+                proxy_url = "http://127.0.0.1:12334"
+
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post(
+                    api_url,
+                    headers=headers,
+                    json=data,
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                    proxy=proxy_url  # 🔧 添加：使用代理（如果需要）
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return {
+                            'content': result['choices'][0]['message']['content'],
+                            'usage': result.get('usage', {})
+                        }
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"API请求失败 (状态码: {response.status}): {error_text}")
+
+        except asyncio.TimeoutError:
+            raise Exception(f"DeepSeek API请求超时 (>{timeout}秒)")
+        except aiohttp.ClientError as e:
+            raise Exception(f"DeepSeek API网络错误: {e}")
+        except Exception as e:
+            if "API请求失败" in str(e):
+                raise  # 重新抛出API错误
+            else:
+                raise Exception(f"DeepSeek API调用异常: {e}")
     
     async def _call_tongyi_api(self, api_config: APIConfig, prompt: str, max_tokens: int, temperature: float) -> Dict:
         """调用通义千问API"""
@@ -257,7 +296,7 @@ class LLMService(ServiceBase):
         headers = {
             'Content-Type': 'application/json'
         }
-        
+
         data = {
             'contents': [{
                 'parts': [{'text': prompt}]
@@ -267,15 +306,41 @@ class LLMService(ServiceBase):
                 'temperature': temperature
             }
         }
-        
-        url = f"{api_config.api_url}/v1beta/models/{api_config.model_name or 'gemini-1.5-flash'}:generateContent?key={api_config.api_key}"
-        
-        async with aiohttp.ClientSession() as session:
+
+        # 🔧 修复：检查URL是否已经包含完整路径
+        if 'generateContent' in api_config.api_url:
+            # URL已经包含完整路径，直接添加API密钥
+            url = f"{api_config.api_url}?key={api_config.api_key}"
+        else:
+            # URL只包含基础路径，需要添加模型路径
+            url = f"{api_config.api_url}/v1beta/models/{api_config.model_name or 'gemini-1.5-flash'}:generateContent?key={api_config.api_key}"
+
+        # 🔧 添加：检测Hiddify代理支持
+        proxy_url = None
+        try:
+            # 检查Hiddify代理是否可用（端口12334）
+            connector = aiohttp.TCPConnector(use_dns_cache=False)
+            async with aiohttp.ClientSession(connector=connector) as test_session:
+                async with test_session.get(
+                    "https://www.google.com",
+                    timeout=aiohttp.ClientTimeout(total=3),
+                    proxy="http://127.0.0.1:12334"
+                ) as test_response:
+                    if test_response.status == 200:
+                        proxy_url = "http://127.0.0.1:12334"
+                        self.logger.info("🌐 检测到Hiddify代理，将使用代理访问Google API")
+        except:
+            # 代理不可用，使用直连
+            pass
+
+        connector = aiohttp.TCPConnector(use_dns_cache=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(
                 url,
                 headers=headers,
                 json=data,
-                timeout=aiohttp.ClientTimeout(total=api_config.timeout)
+                timeout=aiohttp.ClientTimeout(total=api_config.timeout),
+                proxy=proxy_url  # 🔧 添加：使用代理（如果可用）
             ) as response:
                 if response.status == 200:
                     result = await response.json()

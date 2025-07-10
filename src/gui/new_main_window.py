@@ -1505,6 +1505,9 @@ class NewMainWindow(QMainWindow):
                 if hasattr(self.five_stage_storyboard_tab, 'style_combo'):
                     self.five_stage_storyboard_tab.style_combo.setCurrentText(style_text)
 
+                # 🔧 修复：同步后保存到项目文件中
+                self._save_style_to_project(style_text)
+
             # 同步到传统分镜标签页
             if hasattr(self, 'storyboard_tab') and self.storyboard_tab:
                 if hasattr(self.storyboard_tab, 'style_combo'):
@@ -1528,6 +1531,9 @@ class NewMainWindow(QMainWindow):
                             self.five_stage_storyboard_tab.model_combo.setCurrentIndex(i)
                             break
 
+                # 🔧 修复：同步后保存到项目文件中
+                self._save_model_to_project(model_text)
+
             # 同步到传统分镜标签页
             if hasattr(self, 'storyboard_tab') and self.storyboard_tab:
                 if hasattr(self.storyboard_tab, 'model_combo'):
@@ -1542,6 +1548,123 @@ class NewMainWindow(QMainWindow):
         except Exception as e:
             from src.utils.logger import logger
             logger.error(f"同步模型选择失败: {e}")
+
+    def _save_style_to_project(self, style_text):
+        """保存风格选择到当前项目文件"""
+        try:
+            if hasattr(self, 'project_manager') and self.project_manager and self.project_manager.current_project:
+                project_data = self.project_manager.current_project
+
+                # 确保五阶段分镜数据结构存在
+                if 'five_stage_storyboard' not in project_data:
+                    project_data['five_stage_storyboard'] = {}
+
+                # 更新风格设置
+                project_data['five_stage_storyboard']['selected_style'] = style_text
+
+                # 保存项目文件
+                self.project_manager.save_project()
+
+                from src.utils.logger import logger
+                logger.info(f"风格选择已保存到项目文件: {style_text}")
+        except Exception as e:
+            from src.utils.logger import logger
+            logger.error(f"保存风格选择到项目文件失败: {e}")
+
+    def _save_model_to_project(self, model_text):
+        """保存模型选择到当前项目文件"""
+        try:
+            if hasattr(self, 'project_manager') and self.project_manager and self.project_manager.current_project:
+                project_data = self.project_manager.current_project
+
+                # 确保五阶段分镜数据结构存在
+                if 'five_stage_storyboard' not in project_data:
+                    project_data['five_stage_storyboard'] = {}
+
+                # 更新模型设置
+                project_data['five_stage_storyboard']['selected_model'] = model_text
+
+                # 保存项目文件
+                self.project_manager.save_project()
+
+                from src.utils.logger import logger
+                logger.info(f"模型选择已保存到项目文件: {model_text}")
+        except Exception as e:
+            from src.utils.logger import logger
+            logger.error(f"保存模型选择到项目文件失败: {e}")
+
+    def restore_text_creation_settings_from_project(self, project_config):
+        """从项目配置中恢复文章创作界面的风格和模型选择"""
+        try:
+            from src.utils.logger import logger
+
+            # 恢复风格选择 - 尝试多个可能的位置
+            style_setting = ""
+
+            # 方法1：从五阶段分镜数据中获取
+            five_stage_data = project_config.get("five_stage_storyboard", {})
+            style_setting = five_stage_data.get("selected_style", "")
+
+            # 方法2：从text_creation中获取
+            if not style_setting:
+                text_creation_data = project_config.get("text_creation", {})
+                style_setting = text_creation_data.get("selected_style", "")
+
+            # 方法3：从图像生成设置中获取
+            if not style_setting:
+                image_settings = project_config.get("image_generation", {}).get("settings", {})
+                style_setting = image_settings.get("style", "")
+
+            # 方法4：从根级别获取
+            if not style_setting:
+                style_setting = project_config.get("style_setting", "")
+
+            if style_setting and hasattr(self, 'text_style_combo'):
+                # 查找匹配的风格选项
+                for i in range(self.text_style_combo.count()):
+                    item_text = self.text_style_combo.itemText(i)
+                    if style_setting in item_text or item_text in style_setting:
+                        self.text_style_combo.setCurrentIndex(i)
+                        logger.info(f"从项目恢复文章创作风格设置: {style_setting}")
+                        break
+                else:
+                    logger.warning(f"未找到匹配的风格选项: {style_setting}")
+
+            # 恢复模型选择 - 尝试多个可能的位置
+            model_setting = ""
+
+            # 方法1：从五阶段分镜数据中获取
+            model_setting = five_stage_data.get("selected_model", "")
+
+            # 方法2：从text_creation中获取
+            if not model_setting:
+                text_creation_data = project_config.get("text_creation", {})
+                model_setting = text_creation_data.get("selected_model", "")
+
+            # 方法3：从根级别获取
+            if not model_setting:
+                model_setting = project_config.get("model_setting", "")
+
+            if model_setting and hasattr(self, 'text_model_combo'):
+                # 查找匹配的模型选项
+                for i in range(self.text_model_combo.count()):
+                    item_text = self.text_model_combo.itemText(i)
+                    if model_setting in item_text or item_text in model_setting:
+                        self.text_model_combo.setCurrentIndex(i)
+                        logger.info(f"从项目恢复文章创作模型设置: {model_setting}")
+                        break
+                else:
+                    logger.warning(f"未找到匹配的模型选项: {model_setting}")
+
+            # 同步到其他标签页
+            if style_setting:
+                self.sync_style_to_other_tabs(style_setting)
+            if model_setting:
+                self.sync_model_to_other_tabs(model_setting)
+
+        except Exception as e:
+            from src.utils.logger import logger
+            logger.error(f"从项目恢复文章创作设置失败: {e}")
 
     def restore_text_style_and_model_selection(self):
         """恢复文本创作界面的风格和模型选择"""
@@ -1897,6 +2020,9 @@ class NewMainWindow(QMainWindow):
                         else:
                             logger.warning(f"图像文件不存在: {image_path}")
 
+            # 🔧 新增：恢复文章创作界面的风格和模型选择
+            self.restore_text_creation_settings_from_project(project_config)
+
             logger.info("项目内容加载完成")
 
             # 重新启用自动保存
@@ -2090,7 +2216,35 @@ class NewMainWindow(QMainWindow):
                     logger.debug("原始文本已自动保存")
         except Exception as e:
             logger.error(f"自动保存原始文本失败: {e}")
-    
+
+    def save_text_creation_settings_to_project(self):
+        """保存文章创作界面的风格和模型选择到项目"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                return
+
+            from src.utils.logger import logger
+
+            # 确保text_creation数据结构存在
+            if 'text_creation' not in self.project_manager.current_project:
+                self.project_manager.current_project['text_creation'] = {}
+
+            # 保存风格选择
+            if hasattr(self, 'text_style_combo'):
+                current_style = self.text_style_combo.currentText()
+                self.project_manager.current_project['text_creation']['selected_style'] = current_style
+                logger.debug(f"保存文章创作风格选择到项目: {current_style}")
+
+            # 保存模型选择
+            if hasattr(self, 'text_model_combo'):
+                current_model = self.text_model_combo.currentText()
+                self.project_manager.current_project['text_creation']['selected_model'] = current_model
+                logger.debug(f"保存文章创作模型选择到项目: {current_model}")
+
+        except Exception as e:
+            from src.utils.logger import logger
+            logger.error(f"保存文章创作设置到项目失败: {e}")
+
     def save_current_content(self):
         """保存当前界面内容到项目"""
         try:
@@ -2106,7 +2260,10 @@ class NewMainWindow(QMainWindow):
             rewritten_text = self.rewritten_text.toPlainText().strip()
             if rewritten_text:
                 self.project_manager.save_text_content(rewritten_text, "rewritten_text")
-            
+
+            # 🔧 新增：保存文章创作界面的风格和模型选择
+            self.save_text_creation_settings_to_project()
+
             # 触发一致性面板保存预览数据
             if hasattr(self, 'consistency_panel') and self.consistency_panel:
                 current_preview = self.consistency_panel.preview_text.toPlainText().strip()
@@ -2321,6 +2478,17 @@ class NewMainWindow(QMainWindow):
             if hasattr(self, 'storyboard_tab') and hasattr(self.storyboard_tab, 'load_rewritten_text_from_main'):
                 self.storyboard_tab.load_rewritten_text_from_main()
 
+            # 🔧 新增：同步风格和模型选择到其他标签页
+            if hasattr(self, 'text_style_combo'):
+                current_style = self.text_style_combo.currentText()
+                self.sync_style_to_other_tabs(current_style)
+                logger.info(f"AI创作完成后同步风格: {current_style}")
+
+            if hasattr(self, 'text_model_combo'):
+                current_model = self.text_model_combo.currentText()
+                self.sync_model_to_other_tabs(current_model)
+                logger.info(f"AI创作完成后同步模型: {current_model}")
+
             # 自动跳转到五阶段分镜系统的第一阶段
             self.auto_switch_to_five_stage_storyboard()
 
@@ -2399,7 +2567,18 @@ class NewMainWindow(QMainWindow):
             # 同步到分镜标签页
             if hasattr(self, 'storyboard_tab') and hasattr(self.storyboard_tab, 'load_rewritten_text_from_main'):
                 self.storyboard_tab.load_rewritten_text_from_main()
-            
+
+            # 🔧 新增：同步风格和模型选择到其他标签页
+            if hasattr(self, 'text_style_combo'):
+                current_style = self.text_style_combo.currentText()
+                self.sync_style_to_other_tabs(current_style)
+                logger.info(f"文本改写完成后同步风格: {current_style}")
+
+            if hasattr(self, 'text_model_combo'):
+                current_model = self.text_model_combo.currentText()
+                self.sync_model_to_other_tabs(current_model)
+                logger.info(f"文本改写完成后同步模型: {current_model}")
+
             # 自动跳转到五阶段分镜系统的第一阶段
             self.auto_switch_to_five_stage_storyboard()
         
@@ -2502,28 +2681,62 @@ class NewMainWindow(QMainWindow):
         if not text:
             QMessageBox.warning(self, "警告", "请先输入文本内容")
             return
-        
+
         def on_storyboard_finished(result):
             self.display_storyboard(result)
             self.hide_progress()
             self.update_project_status()
             self.status_label.setText("分镜生成完成")
-        
+
         def on_storyboard_error(error):
             self.hide_progress()
             QMessageBox.critical(self, "生成失败", f"分镜生成失败:\n{error}")
-        
+
         def on_progress(progress, message):
             self.show_progress(progress, message)
-        
-        if hasattr(self, 'storyboard_tab') and hasattr(self.storyboard_tab, 'style_combo'):
+
+        # 🔧 修复：优先从文章创作界面获取风格选择，然后从分镜标签页获取，最后使用默认值
+        style = None
+
+        # 方法1：从文章创作界面的风格选择获取
+        if hasattr(self, 'text_style_combo'):
+            style = self.text_style_combo.currentText()
+            from src.utils.logger import logger
+            logger.info(f"从文章创作界面获取风格: {style}")
+
+        # 方法2：如果文章创作界面没有风格选择，从分镜标签页获取
+        if not style and hasattr(self, 'storyboard_tab') and hasattr(self.storyboard_tab, 'style_combo'):
             style = self.storyboard_tab.style_combo.currentText()
-        else:
+            from src.utils.logger import logger
+            logger.info(f"从分镜标签页获取风格: {style}")
+
+        # 方法3：如果都没有，使用配置中的默认风格
+        if not style:
             from src.utils.config_manager import ConfigManager
             config_manager = ConfigManager()
             style = config_manager.get_setting("default_style", "电影风格")
-        provider = self.storyboard_tab.rewrite_provider_combo.currentText() if hasattr(self, 'storyboard_tab') and hasattr(self.storyboard_tab, 'rewrite_provider_combo') and self.storyboard_tab.rewrite_provider_combo.currentText() != "自动选择" else None
-        
+            from src.utils.logger import logger
+            logger.info(f"使用默认风格: {style}")
+
+        # 获取大模型提供商
+        provider = None
+        if hasattr(self, 'text_model_combo'):
+            model_text = self.text_model_combo.currentText()
+            # 将中文模型名称映射到提供商名称
+            model_mapping = {
+                "通义千问": "qwen",
+                "智谱AI": "zhipu",
+                "百度文心": "baidu",
+                "腾讯混元": "tencent"
+            }
+            provider = model_mapping.get(model_text)
+            from src.utils.logger import logger
+            logger.info(f"从文章创作界面获取模型: {model_text} -> {provider}")
+        elif hasattr(self, 'storyboard_tab') and hasattr(self.storyboard_tab, 'rewrite_provider_combo') and self.storyboard_tab.rewrite_provider_combo.currentText() != "自动选择":
+            provider = self.storyboard_tab.rewrite_provider_combo.currentText()
+            from src.utils.logger import logger
+            logger.info(f"从分镜标签页获取提供商: {provider}")
+
         self.current_worker = AsyncWorker(
             self.app_controller.generate_storyboard_only,
             text, style, provider, on_progress

@@ -73,13 +73,26 @@ class APIManager:
             # 加载LLM配置
             llm_models = self.config_manager.get_models()
             for model in llm_models:
+                # 🔧 修复：根据提供商类型设置默认模型名称
+                provider_type = model.get('type', '').lower()
+                default_model_name = ''
+
+                if provider_type == 'deepseek':
+                    default_model_name = 'deepseek-chat'
+                elif provider_type == 'tongyi':
+                    default_model_name = 'qwen-plus'
+                elif provider_type == 'zhipu':
+                    default_model_name = 'glm-4-flash'
+                elif provider_type == 'google':
+                    default_model_name = 'gemini-1.5-flash'
+
                 api_config = APIConfig(
                     name=model.get('name', ''),
                     api_type=APIType.LLM,
                     provider=model.get('type', ''),
                     api_key=model.get('key', ''),
                     api_url=model.get('url', ''),
-                    model_name=model.get('model_name', ''),
+                    model_name=model.get('model_name', default_model_name),
                     priority=model.get('priority', 1),
                     enabled=model.get('enabled', True)
                 )

@@ -4997,6 +4997,31 @@ class FiveStageStoryboardTab(QWidget):
             if 'five_stage_storyboard' not in project_data:
                 logger.info(f"项目 {project_data.get('name', 'Unknown')} 中没有五阶段分镜数据")
                 logger.info(f"项目数据键: {list(project_data.keys())}")
+
+                # 🔧 修复：从父窗口获取当前的风格和模型设置，而不是使用硬编码默认值
+                default_style = '电影风格'
+                default_model = '通义千问'
+
+                # 尝试从父窗口的文章创作界面获取当前设置
+                if self.parent_window:
+                    try:
+                        # 从文章创作标签页获取风格设置
+                        if hasattr(self.parent_window, 'text_creation_tab'):
+                            text_tab = self.parent_window.text_creation_tab
+                            if hasattr(text_tab, 'style_combo') and text_tab.style_combo:
+                                current_style = text_tab.style_combo.currentText()
+                                if current_style:
+                                    default_style = current_style
+                                    logger.info(f"从文章创作界面获取风格设置: {default_style}")
+
+                            if hasattr(text_tab, 'model_combo') and text_tab.model_combo:
+                                current_model = text_tab.model_combo.currentText()
+                                if current_model:
+                                    default_model = current_model
+                                    logger.info(f"从文章创作界面获取模型设置: {default_model}")
+                    except Exception as e:
+                        logger.warning(f"从父窗口获取设置失败，使用默认值: {e}")
+
                 # 创建默认的五阶段数据结构
                 project_data['five_stage_storyboard'] = {
                     'stage_data': {},
@@ -5004,10 +5029,10 @@ class FiveStageStoryboardTab(QWidget):
                     'selected_characters': [],
                     'selected_scenes': [],
                     'article_text': '',
-                    'selected_style': '电影风格',
-                    'selected_model': '通义千问'
+                    'selected_style': default_style,
+                    'selected_model': default_model
                 }
-                logger.info("已创建默认的五阶段分镜数据结构")
+                logger.info(f"已创建默认的五阶段分镜数据结构，风格: {default_style}, 模型: {default_model}")
                 # 继续处理，不要直接返回
             
             five_stage_data = project_data['five_stage_storyboard']
@@ -5080,7 +5105,24 @@ class FiveStageStoryboardTab(QWidget):
                 else:
                     logger.info("article_input组件尚未初始化，将在组件就绪后恢复")
             
+            # 🔧 修复：优先从父窗口获取当前风格设置，而不是从项目文件
             selected_style = five_stage_data.get('selected_style', '电影风格')
+
+            # 尝试从父窗口的文章创作界面获取最新的风格设置
+            if self.parent_window:
+                try:
+                    if hasattr(self.parent_window, 'text_creation_tab'):
+                        text_tab = self.parent_window.text_creation_tab
+                        if hasattr(text_tab, 'style_combo') and text_tab.style_combo:
+                            current_style = text_tab.style_combo.currentText()
+                            if current_style and current_style != selected_style:
+                                selected_style = current_style
+                                logger.info(f"从文章创作界面同步最新风格设置: {selected_style}")
+                                # 更新项目数据中的风格设置
+                                five_stage_data['selected_style'] = selected_style
+                except Exception as e:
+                    logger.warning(f"从父窗口同步风格设置失败: {e}")
+
             if hasattr(self, 'style_combo') and self.style_combo:
                 try:
                     style_index = self.style_combo.findText(selected_style)
@@ -5103,7 +5145,24 @@ class FiveStageStoryboardTab(QWidget):
             else:
                 logger.info("style_combo组件尚未初始化，将在组件就绪后恢复样式")
             
+            # 🔧 修复：优先从父窗口获取当前模型设置，而不是从项目文件
             selected_model = five_stage_data.get('selected_model', '')
+
+            # 尝试从父窗口的文章创作界面获取最新的模型设置
+            if self.parent_window:
+                try:
+                    if hasattr(self.parent_window, 'text_creation_tab'):
+                        text_tab = self.parent_window.text_creation_tab
+                        if hasattr(text_tab, 'model_combo') and text_tab.model_combo:
+                            current_model = text_tab.model_combo.currentText()
+                            if current_model and current_model != selected_model:
+                                selected_model = current_model
+                                logger.info(f"从文章创作界面同步最新模型设置: {selected_model}")
+                                # 更新项目数据中的模型设置
+                                five_stage_data['selected_model'] = selected_model
+                except Exception as e:
+                    logger.warning(f"从父窗口同步模型设置失败: {e}")
+
             if selected_model:
                 if hasattr(self, 'model_combo') and self.model_combo:
                     try:

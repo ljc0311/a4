@@ -670,6 +670,21 @@ class CogVideoXEngine(VideoGenerationEngine):
 
         while time.time() - start_time < max_wait_time:
             try:
+                # 🔧 修复：检查事件循环状态，避免在已关闭的循环中继续轮询
+                try:
+                    current_loop = asyncio.get_running_loop()
+                    if current_loop.is_closed():
+                        logger.warning("事件循环已关闭，停止轮询任务状态")
+                        raise asyncio.CancelledError("事件循环已关闭")
+                except RuntimeError:
+                    logger.warning("没有运行中的事件循环，停止轮询任务状态")
+                    raise asyncio.CancelledError("没有运行中的事件循环")
+
+                # 检查会话状态
+                if self.session.closed:
+                    logger.warning("HTTP会话已关闭，停止轮询任务状态")
+                    raise asyncio.CancelledError("HTTP会话已关闭")
+
                 # 使用会话的默认超时设置，避免超时管理器冲突
                 async with self.session.get(url) as response:
                     if response.status != 200:
@@ -727,8 +742,13 @@ class CogVideoXEngine(VideoGenerationEngine):
                 if "查询任务状态失败" in str(e) and "504" not in str(e):
                     raise e
 
-                # 处理网络相关错误
+                # 🔧 修复：检查是否是事件循环相关错误
                 error_str = str(e).lower()
+                if any(keyword in error_str for keyword in ['event loop is closed', 'loop is closed', 'no running loop']):
+                    logger.warning(f"事件循环错误，停止轮询: {e}")
+                    raise asyncio.CancelledError("事件循环已关闭或不可用")
+
+                # 处理网络相关错误
                 if any(keyword in error_str for keyword in ['timeout', '超时', 'connection', 'network', '网络', '504', 'cancelled', 'disconnected', 'server']):
                     consecutive_errors += 1
                     logger.warning(f"网络相关错误: {e} (连续错误: {consecutive_errors}/{max_consecutive_errors})")
@@ -740,10 +760,29 @@ class CogVideoXEngine(VideoGenerationEngine):
                     backoff_delay = poll_interval * (backoff_multiplier ** consecutive_errors)
                     backoff_delay = min(backoff_delay, 120)  # 最大等待2分钟
                     logger.info(f"网络错误后等待 {backoff_delay:.1f} 秒再重试...")
-                    await asyncio.sleep(backoff_delay)
+
+                    # 🔧 修复：在sleep前再次检查事件循环状态
+                    try:
+                        current_loop = asyncio.get_running_loop()
+                        if current_loop.is_closed():
+                            logger.warning("事件循环已关闭，停止重试")
+                            raise asyncio.CancelledError("事件循环已关闭")
+                        await asyncio.sleep(backoff_delay)
+                    except RuntimeError:
+                        logger.warning("没有运行中的事件循环，停止重试")
+                        raise asyncio.CancelledError("没有运行中的事件循环")
                 else:
                     logger.warning(f"查询任务状态时出错: {e}")
-                    await asyncio.sleep(poll_interval)
+                    # 🔧 修复：在sleep前检查事件循环状态
+                    try:
+                        current_loop = asyncio.get_running_loop()
+                        if current_loop.is_closed():
+                            logger.warning("事件循环已关闭，停止轮询")
+                            raise asyncio.CancelledError("事件循环已关闭")
+                        await asyncio.sleep(poll_interval)
+                    except RuntimeError:
+                        logger.warning("没有运行中的事件循环，停止轮询")
+                        raise asyncio.CancelledError("没有运行中的事件循环")
 
         # 提供更详细的超时错误信息
         elapsed_minutes = max_wait_time // 60

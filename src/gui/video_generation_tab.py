@@ -148,7 +148,14 @@ class VideoGenerationWorker(QThread):
             image_path = self.scene_data.get('image_path', '')
 
             # 获取提示词 - 优先使用scene_data中的prompt字段
-            prompt = self.scene_data.get('prompt', '') or self._get_prompt_from_file() or self.scene_data.get('enhanced_description', self.scene_data.get('description', ''))
+            original_prompt = self.scene_data.get('prompt', '') or self._get_prompt_from_file() or self.scene_data.get('enhanced_description', self.scene_data.get('description', ''))
+
+            # 优化提示词以适合视频生成
+            shot_id = self.scene_data.get('shot_id', '')
+            duration = self.generation_config.get('duration', 5.0)
+            optimized_prompt = self._optimize_prompt_for_cogvideox(original_prompt, shot_id, duration)
+
+            logger.info(f"视频生成提示词: {optimized_prompt}")
 
             if not image_path or not os.path.exists(image_path):
                 raise Exception(f"图像文件不存在: {image_path}")
@@ -158,7 +165,7 @@ class VideoGenerationWorker(QThread):
             # 生成视频（使用正确的分辨率）
             video_path = await processor.generate_video_from_image(
                 image_path=image_path,
-                prompt=prompt,
+                prompt=optimized_prompt,
                 duration=self.generation_config.get('duration', 5.0),
                 fps=self.generation_config.get('fps', 30),  # 使用CogVideoX支持的帧率
                 width=self.generation_config.get('width', 1024),
@@ -298,8 +305,8 @@ class VideoGenerationTab(QWidget):
         except Exception as e:
             logger.error(f"处理并发数变化时出错: {e}")
 
-    def _optimize_prompt_for_cogvideox(self, original_prompt: str, shot_id: str = "") -> str:
-        """使用CogVideoX优化器优化提示词"""
+    def _optimize_prompt_for_cogvideox(self, original_prompt: str, shot_id: str = "", duration: float = 5.0) -> str:
+        """使用CogVideoX优化器优化视频提示词"""
         try:
             from src.processors.cogvideox_prompt_optimizer import CogVideoXPromptOptimizer
 
@@ -309,14 +316,14 @@ class VideoGenerationTab(QWidget):
             # 获取镜头信息（如果有的话）
             shot_info = self._get_shot_technical_info(shot_id)
 
-            # 优化提示词
-            optimized = optimizer.optimize_prompt(original_prompt, shot_info)
+            # 使用视频专用优化方法
+            optimized = optimizer.optimize_for_video(original_prompt, shot_info, duration)
 
-            logger.debug(f"提示词优化: {original_prompt[:50]}... -> {optimized[:50]}...")
+            logger.info(f"视频提示词优化: {original_prompt[:50]}... -> {optimized[:50]}...")
             return optimized
 
         except Exception as e:
-            logger.warning(f"提示词优化失败，使用原始提示词: {e}")
+            logger.warning(f"视频提示词优化失败，使用原始提示词: {e}")
             return original_prompt
 
     def _get_shot_technical_info(self, shot_id: str) -> Dict:

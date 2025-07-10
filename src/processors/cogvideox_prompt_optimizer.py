@@ -82,34 +82,67 @@ class CogVideoXPromptOptimizer:
     def optimize_prompt(self, original_prompt: str, shot_info: Dict = None) -> str:
         """
         优化提示词以适合CogVideoX
-        
+
         Args:
             original_prompt: 原始提示词
             shot_info: 镜头信息字典
-            
+
         Returns:
             优化后的英文提示词
         """
         try:
             # 清理原始提示词
             cleaned_prompt = self._clean_original_prompt(original_prompt)
-            
+
             # 提取关键信息
             scene_info = self._extract_scene_info(cleaned_prompt, shot_info)
-            
+
             # 构建优化的提示词
             optimized_prompt = self._build_optimized_prompt(scene_info)
-            
+
             # 添加技术质量描述
             final_prompt = self._add_quality_descriptors(optimized_prompt)
-            
+
             logger.info(f"提示词优化完成: {len(original_prompt)} -> {len(final_prompt)} 字符")
             return final_prompt
-            
+
         except Exception as e:
             logger.error(f"提示词优化失败: {e}")
             # 返回基础优化版本
             return self._basic_optimization(original_prompt)
+
+    def optimize_for_video(self, image_prompt: str, shot_info: Dict = None, duration: float = 5.0) -> str:
+        """
+        专门为视频生成优化提示词
+
+        Args:
+            image_prompt: 图像生成的提示词
+            shot_info: 镜头信息字典
+            duration: 视频时长
+
+        Returns:
+            优化后的视频生成提示词
+        """
+        try:
+            # 清理图像提示词，移除静态描述
+            cleaned_prompt = self._clean_for_video(image_prompt)
+
+            # 提取关键信息
+            scene_info = self._extract_scene_info(cleaned_prompt, shot_info)
+
+            # 构建视频专用提示词
+            video_prompt = self._build_video_prompt(scene_info, duration)
+
+            # 添加视频质量描述
+            final_prompt = self._add_video_quality_descriptors(video_prompt)
+
+            logger.info(f"视频提示词优化完成: {len(image_prompt)} -> {len(final_prompt)} 字符")
+            return final_prompt
+
+        except Exception as e:
+            logger.error(f"视频提示词优化失败: {e}")
+            # 返回基础视频优化版本
+            return self._basic_video_optimization(image_prompt)
     
     def _clean_original_prompt(self, prompt: str) -> str:
         """清理原始提示词"""
@@ -140,31 +173,63 @@ class CogVideoXPromptOptimizer:
             'mood': 'peaceful',
             'shot_type': 'medium shot'
         }
-        
-        # 提取角色
+
+        # 提取角色（扩展识别）
         if '阿福' in prompt:
             info['characters'].append('an elderly Chinese man named Afu')
         if '小咪' in prompt:
             info['characters'].append('a black and white cat named Xiaomi')
-        
-        # 提取场景
+        if '林海' in prompt:
+            info['characters'].append('an elderly sailor named Lin Hai')
+        if '小雨' in prompt:
+            info['characters'].append('a young girl named Xiao Yu')
+        if '老水手' in prompt or '水手' in prompt:
+            info['characters'].append('an elderly sailor')
+        if '老人' in prompt:
+            info['characters'].append('an elderly man')
+
+        # 提取场景（扩展识别）
         if '小院' in prompt or '院子' in prompt:
-            info['scene'] = 'a quiet traditional Chinese courtyard'
+            info['scene'] = 'in a quiet traditional Chinese courtyard'
         elif '厨房' in prompt:
-            info['scene'] = 'a warm traditional kitchen'
+            info['scene'] = 'in a warm traditional kitchen'
         elif '市场' in prompt:
-            info['scene'] = 'a bustling traditional market'
-        
-        # 提取动作
-        for chinese, english in self.action_verbs.items():
+            info['scene'] = 'in a bustling traditional market'
+        elif '海面' in prompt or '海洋' in prompt or '大海' in prompt:
+            info['scene'] = 'on the vast ocean'
+        elif '船' in prompt or '渔船' in prompt:
+            info['scene'] = 'on a fishing boat'
+        elif '海底' in prompt:
+            info['scene'] = 'in the underwater world'
+        elif '城市' in prompt:
+            info['scene'] = 'in an ancient city'
+
+        # 提取动作（扩展识别）
+        action_mappings = {
+            '坐着': 'sitting peacefully',
+            '站着': 'standing calmly',
+            '抚摸': 'gently stroking',
+            '看着': 'looking at',
+            '微笑': 'smiling warmly',
+            '紧握': 'gripping tightly',
+            '望向': 'gazing towards',
+            '回想': 'reminiscing about',
+            '摇晃': 'swaying gently',
+            '升起': 'rising slowly',
+            '闪烁': 'flickering softly',
+            '流露': 'showing expression',
+            '牵起': 'holding hands'
+        }
+
+        for chinese, english in action_mappings.items():
             if chinese in prompt:
                 info['actions'].append(english)
-        
+
         # 从shot_info获取技术信息
         if shot_info:
             info['shot_type'] = shot_info.get('shot_type', 'medium shot')
             info['camera_angle'] = shot_info.get('camera_angle', 'eye level')
-        
+
         return info
     
     def _build_optimized_prompt(self, scene_info: Dict) -> str:
@@ -231,7 +296,100 @@ class CogVideoXPromptOptimizer:
         result += ". cinematic quality, highly detailed, photorealistic"
         
         return result
-    
+
+    def _clean_for_video(self, image_prompt: str) -> str:
+        """清理图像提示词以适合视频生成"""
+        # 移除静态描述词
+        static_terms = [
+            '静止', '画面静止', '静谧', '静态', 'static', 'still',
+            '水彩画风', '柔和笔触', '粉彩色', '插画', '温柔',
+            '三分法构图', '对称构图', '对角线构图',
+            '电影感', '超写实', '4K', '胶片颗粒', '景深',
+            '技术细节补充', '全景', '中景', '特写', '平视', '俯视', '侧面'
+        ]
+
+        cleaned = image_prompt
+        for term in static_terms:
+            cleaned = re.sub(f'{term}[；;，,。.]*', '', cleaned)
+
+        # 移除多余的标点和空格
+        cleaned = re.sub(r'[，。；;]+', ', ', cleaned)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+        return cleaned
+
+    def _build_video_prompt(self, scene_info: Dict, duration: float) -> str:
+        """构建视频专用提示词"""
+        parts = []
+
+        # 主要动作描述
+        if scene_info['characters'] and scene_info['actions']:
+            character = scene_info['characters'][0]
+            action = scene_info['actions'][0] if scene_info['actions'] else 'moves naturally'
+            scene = scene_info['scene'] or 'in a peaceful environment'
+
+            # 根据时长调整动作描述
+            if duration <= 3:
+                motion_desc = "with subtle movements"
+            elif duration <= 6:
+                motion_desc = "with gentle, flowing movements"
+            else:
+                motion_desc = "with smooth, continuous movements"
+
+            main_desc = f"{character} {action} {scene} {motion_desc}"
+            parts.append(main_desc)
+
+        # 添加摄像机运动（适合视频）
+        camera_movements = [
+            'The camera slowly pans to follow the action',
+            'Gentle camera movement captures the scene',
+            'Smooth camera motion reveals details',
+            'The camera maintains steady focus'
+        ]
+        camera = camera_movements[0]  # 可以根据场景类型选择
+        parts.append(camera)
+
+        # 添加动态光照
+        lighting_effects = [
+            'Natural lighting shifts subtly',
+            'Soft light creates gentle shadows',
+            'Warm light enhances the atmosphere',
+            'Dynamic lighting adds depth'
+        ]
+        lighting = lighting_effects[0]
+        parts.append(lighting)
+
+        return '. '.join(parts)
+
+    def _add_video_quality_descriptors(self, prompt: str) -> str:
+        """添加视频质量描述符"""
+        # 视频专用质量描述符
+        video_quality_parts = [
+            "smooth motion",
+            "natural movement",
+            "cinematic flow",
+            "high quality video",
+            "stable footage",
+            "professional cinematography"
+        ]
+
+        quality_str = ', '.join(video_quality_parts[:4])  # 选择前4个避免过长
+        return f"{prompt}. {quality_str}"
+
+    def _basic_video_optimization(self, image_prompt: str) -> str:
+        """基础视频优化（备用方案）"""
+        # 简单清理静态描述
+        cleaned = self._clean_for_video(image_prompt)
+
+        # 添加基础动作描述
+        if not any(word in cleaned.lower() for word in ['move', 'motion', 'flow', 'gentle']):
+            cleaned += ", with gentle natural movements"
+
+        # 添加基础视频质量描述
+        cleaned += ". smooth motion, cinematic flow, high quality video"
+
+        return cleaned
+
     def batch_optimize_prompts(self, prompt_file_path: str) -> bool:
         """批量优化prompt.json文件中的提示词"""
         try:

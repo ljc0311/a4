@@ -72,8 +72,9 @@ class StoryboardImageGenerationTab(QWidget):
         self.init_ui()
         self.load_storyboard_data()
 
-        # 加载项目设置
-        self.load_generation_settings()
+        # 连接项目管理器信号（如果存在）
+        if self.project_manager and hasattr(self.project_manager, 'project_loaded'):
+            self.project_manager.project_loaded.connect(self.on_project_loaded)
 
         # 🔧 新增：检测并设置工作流程模式
         self._detect_and_set_workflow_mode()
@@ -83,6 +84,458 @@ class StoryboardImageGenerationTab(QWidget):
         self.auto_save_timer.setSingleShot(True)
         self.auto_save_timer.timeout.connect(self.auto_save_settings)
         self.auto_save_delay = 2000  # 2秒延迟
+
+        # 延迟加载项目设置，确保UI完全初始化后再加载
+        QTimer.singleShot(100, self.load_all_settings_from_project)
+
+    def get_selected_style(self):
+        """获取用户选择的风格"""
+        return self.style_combo.currentText() if hasattr(self, 'style_combo') else "电影风格"
+
+    def load_all_settings_from_project(self):
+        """从项目设置中加载所有设置"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                logger.info("无项目，使用默认设置")
+                self.load_default_settings()
+                return
+
+            project_data = self.project_manager.current_project
+
+            # 兼容不同的项目数据结构
+            if hasattr(project_data, 'data'):
+                data = project_data.data
+            else:
+                data = project_data.get("data", {})
+
+            # 优先使用新的数据结构
+            image_settings = data.get("image_generation", {}).get("settings", {})
+
+            # 如果新结构不存在，尝试从旧结构加载
+            if not image_settings:
+                logger.info("新数据结构不存在，尝试从旧结构加载设置")
+                old_settings = project_data.get("image_generation_settings", {})
+                if old_settings:
+                    # 转换旧设置到新格式
+                    image_settings = self.migrate_old_settings(old_settings)
+                    # 保存到新结构
+                    self.save_migrated_settings(image_settings)
+                    logger.info("已迁移旧设置到新数据结构")
+
+            if not image_settings:
+                logger.info("项目中无图像生成设置，使用默认设置")
+                self.load_default_settings()
+                return
+
+            # 加载所有设置
+            self.load_settings_from_dict(image_settings)
+            logger.info("从项目设置加载所有图像生成设置")
+
+        except Exception as e:
+            logger.error(f"加载项目设置失败: {e}")
+            self.load_default_settings()
+
+    def load_settings_from_dict(self, settings: dict):
+        """从设置字典加载UI设置"""
+        try:
+            # 阻止信号触发，避免在加载时保存设置
+            self.block_signals(True)
+
+            # 风格设置
+            if hasattr(self, 'style_combo') and "style" in settings:
+                style = settings["style"]
+                for i in range(self.style_combo.count()):
+                    if self.style_combo.itemText(i) == style:
+                        self.style_combo.setCurrentText(style)
+                        break
+
+            # 引擎设置
+            if hasattr(self, 'engine_combo') and "engine" in settings:
+                engine = settings["engine"]
+                logger.info(f"尝试加载引擎设置: {engine}")
+
+                # 首先尝试通过itemData匹配（精确匹配）
+                found = False
+                for i in range(self.engine_combo.count()):
+                    item_data = self.engine_combo.itemData(i)
+                    if item_data == engine:
+                        self.engine_combo.setCurrentIndex(i)
+                        logger.info(f"通过itemData匹配到引擎: {self.engine_combo.itemText(i)}")
+                        found = True
+                        break
+
+                # 如果精确匹配失败，尝试文本匹配（模糊匹配）
+                if not found:
+                    for i in range(self.engine_combo.count()):
+                        item_text = self.engine_combo.itemText(i)
+                        if engine in item_text or item_text in engine:
+                            self.engine_combo.setCurrentIndex(i)
+                            logger.info(f"通过文本匹配到引擎: {item_text}")
+                            found = True
+                            break
+
+                if not found:
+                    logger.warning(f"未找到匹配的引擎: {engine}")
+                    # 列出所有可用引擎供调试
+                    available_engines = []
+                    for i in range(self.engine_combo.count()):
+                        available_engines.append(f"{self.engine_combo.itemText(i)} ({self.engine_combo.itemData(i)})")
+                    logger.info(f"可用引擎: {available_engines}")
+
+            # 尺寸设置
+            if hasattr(self, 'width_spin') and "width" in settings:
+                self.width_spin.setValue(settings["width"])
+            if hasattr(self, 'height_spin') and "height" in settings:
+                self.height_spin.setValue(settings["height"])
+
+            # 高级参数
+            if hasattr(self, 'steps_spin') and "steps" in settings:
+                self.steps_spin.setValue(settings["steps"])
+            if hasattr(self, 'cfg_spin') and "cfg_scale" in settings:
+                self.cfg_spin.setValue(settings["cfg_scale"])
+            if hasattr(self, 'seed_combo') and "seed_mode" in settings:
+                self.seed_combo.setCurrentText(settings["seed_mode"])
+            if hasattr(self, 'sampler_combo') and "sampler" in settings:
+                sampler = settings["sampler"]
+                for i in range(self.sampler_combo.count()):
+                    if self.sampler_combo.itemText(i) == sampler:
+                        self.sampler_combo.setCurrentIndex(i)
+                        break
+            if hasattr(self, 'negative_prompt_text') and "negative_prompt" in settings:
+                self.negative_prompt_text.setPlainText(settings["negative_prompt"])
+
+            # 批处理设置
+            if hasattr(self, 'batch_size_spin') and "batch_size" in settings:
+                self.batch_size_spin.setValue(settings["batch_size"])
+            if hasattr(self, 'retry_count_spin') and "retry_count" in settings:
+                self.retry_count_spin.setValue(settings["retry_count"])
+            if hasattr(self, 'delay_spin') and "delay" in settings:
+                self.delay_spin.setValue(settings["delay"])
+            if hasattr(self, 'concurrent_tasks_spin') and "concurrent_tasks" in settings:
+                self.concurrent_tasks_spin.setValue(settings["concurrent_tasks"])
+
+            # Pollinations特有设置
+            if hasattr(self, 'pollinations_model_combo') and "model" in settings:
+                model = settings["model"]
+                for i in range(self.pollinations_model_combo.count()):
+                    if self.pollinations_model_combo.itemText(i) == model:
+                        self.pollinations_model_combo.setCurrentIndex(i)
+                        break
+            if hasattr(self, 'pollinations_enhance_check') and "enhance" in settings:
+                self.pollinations_enhance_check.setChecked(settings["enhance"])
+            if hasattr(self, 'pollinations_logo_check') and "logo" in settings:
+                self.pollinations_logo_check.setChecked(settings["logo"])
+
+            # 恢复信号
+            self.block_signals(False)
+
+            # 触发引擎切换事件以更新UI显示
+            if hasattr(self, 'engine_combo'):
+                self.on_engine_changed(self.engine_combo.currentText())
+
+        except Exception as e:
+            logger.error(f"从设置字典加载设置失败: {e}")
+            self.block_signals(False)
+
+    def load_default_settings(self):
+        """加载默认设置"""
+        try:
+            self.block_signals(True)
+
+            # 设置默认值
+            if hasattr(self, 'style_combo'):
+                self.style_combo.setCurrentText("电影风格")
+            if hasattr(self, 'engine_combo'):
+                self.engine_combo.setCurrentIndex(0)  # 第一个引擎
+            if hasattr(self, 'width_spin'):
+                self.width_spin.setValue(1024)
+            if hasattr(self, 'height_spin'):
+                self.height_spin.setValue(1024)
+            if hasattr(self, 'steps_spin'):
+                self.steps_spin.setValue(20)
+            if hasattr(self, 'cfg_spin'):
+                self.cfg_spin.setValue(7.5)
+            if hasattr(self, 'seed_combo'):
+                self.seed_combo.setCurrentText("随机")
+
+            self.block_signals(False)
+            logger.info("已加载默认设置")
+
+        except Exception as e:
+            logger.error(f"加载默认设置失败: {e}")
+            self.block_signals(False)
+
+    def block_signals(self, block: bool):
+        """阻止或恢复UI组件信号"""
+        components = [
+            'style_combo', 'engine_combo', 'width_spin', 'height_spin',
+            'steps_spin', 'cfg_spin', 'seed_combo', 'sampler_combo',
+            'negative_prompt_text', 'batch_size_spin', 'retry_count_spin',
+            'delay_spin', 'concurrent_tasks_spin', 'pollinations_model_combo',
+            'pollinations_enhance_check', 'pollinations_logo_check'
+        ]
+
+        for component_name in components:
+            if hasattr(self, component_name):
+                component = getattr(self, component_name)
+                if hasattr(component, 'blockSignals'):
+                    component.blockSignals(block)
+
+    def load_style_from_project(self):
+        """从项目设置中加载风格（兼容性方法）"""
+        try:
+            if self.project_manager and self.project_manager.current_project:
+                project_data = self.project_manager.current_project
+
+                # 兼容不同的项目数据结构
+                if hasattr(project_data, 'data'):
+                    image_settings = project_data.data.get("image_generation", {}).get("settings", {})
+                else:
+                    data = project_data.get("data", project_data)
+                    image_settings = data.get("image_generation", {}).get("settings", {})
+
+                saved_style = image_settings.get("style", "电影风格")
+
+                # 如果保存的风格在可选项中，则设置为当前选择
+                if hasattr(self, 'style_combo'):
+                    for i in range(self.style_combo.count()):
+                        if self.style_combo.itemText(i) == saved_style:
+                            self.style_combo.setCurrentText(saved_style)
+                            logger.info(f"从项目设置加载风格: {saved_style}")
+                            return
+
+                # 如果没有找到匹配的风格，使用默认值
+                if hasattr(self, 'style_combo'):
+                    self.style_combo.setCurrentText("电影风格")
+                    logger.info("使用默认风格: 电影风格")
+            else:
+                # 没有项目时使用默认风格
+                if hasattr(self, 'style_combo'):
+                    self.style_combo.setCurrentText("电影风格")
+                    logger.info("无项目，使用默认风格: 电影风格")
+        except Exception as e:
+            logger.error(f"加载项目风格设置失败: {e}")
+            if hasattr(self, 'style_combo'):
+                self.style_combo.setCurrentText("电影风格")
+
+    def save_all_settings_to_project(self):
+        """保存所有设置到项目"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                return
+
+            project_data = self.project_manager.current_project
+
+            # 兼容不同的项目数据结构
+            if hasattr(project_data, 'data'):
+                data = project_data.data
+            else:
+                if "data" not in project_data:
+                    project_data["data"] = {}
+                data = project_data["data"]
+
+            # 确保图像生成设置结构存在
+            if "image_generation" not in data:
+                data["image_generation"] = {"images": [], "settings": {}}
+            if "settings" not in data["image_generation"]:
+                data["image_generation"]["settings"] = {}
+
+            settings = data["image_generation"]["settings"]
+
+            # 保存所有图像生成设置
+            if hasattr(self, 'style_combo'):
+                settings["style"] = self.style_combo.currentText()
+            if hasattr(self, 'engine_combo'):
+                # 保存引擎的实际标识符，而不是显示文本
+                current_index = self.engine_combo.currentIndex()
+                engine_data = self.engine_combo.itemData(current_index)
+                if engine_data:
+                    settings["engine"] = engine_data
+                else:
+                    # 如果没有itemData，回退到文本
+                    settings["engine"] = self.engine_combo.currentText()
+            if hasattr(self, 'width_spin'):
+                settings["width"] = self.width_spin.value()
+            if hasattr(self, 'height_spin'):
+                settings["height"] = self.height_spin.value()
+            if hasattr(self, 'steps_spin'):
+                settings["steps"] = self.steps_spin.value()
+            if hasattr(self, 'cfg_spin'):
+                settings["cfg_scale"] = self.cfg_spin.value()
+            if hasattr(self, 'seed_combo'):
+                settings["seed_mode"] = self.seed_combo.currentText()
+            if hasattr(self, 'sampler_combo'):
+                settings["sampler"] = self.sampler_combo.currentText()
+            if hasattr(self, 'negative_prompt_text'):
+                settings["negative_prompt"] = self.negative_prompt_text.toPlainText()
+            if hasattr(self, 'batch_size_spin'):
+                settings["batch_size"] = self.batch_size_spin.value()
+            if hasattr(self, 'retry_count_spin'):
+                settings["retry_count"] = self.retry_count_spin.value()
+            if hasattr(self, 'delay_spin'):
+                settings["delay"] = self.delay_spin.value()
+            if hasattr(self, 'concurrent_tasks_spin'):
+                settings["concurrent_tasks"] = self.concurrent_tasks_spin.value()
+
+            # Pollinations特有设置
+            if hasattr(self, 'pollinations_model_combo'):
+                settings["model"] = self.pollinations_model_combo.currentText()
+            if hasattr(self, 'pollinations_enhance_check'):
+                settings["enhance"] = self.pollinations_enhance_check.isChecked()
+            if hasattr(self, 'pollinations_logo_check'):
+                settings["logo"] = self.pollinations_logo_check.isChecked()
+
+            # 标记项目已修改
+            if hasattr(self.project_manager, 'mark_project_modified'):
+                self.project_manager.mark_project_modified()
+
+            logger.info("所有图像生成设置已保存到项目")
+        except Exception as e:
+            logger.error(f"保存设置到项目失败: {e}")
+
+    def save_style_to_project(self, style: str):
+        """保存风格到项目设置（兼容性方法）"""
+        try:
+            if self.project_manager and self.project_manager.current_project:
+                project_data = self.project_manager.current_project
+
+                # 兼容不同的项目数据结构
+                if hasattr(project_data, 'data'):
+                    data = project_data.data
+                else:
+                    if "data" not in project_data:
+                        project_data["data"] = {}
+                    data = project_data["data"]
+
+                # 确保图像生成设置结构存在
+                if "image_generation" not in data:
+                    data["image_generation"] = {"images": [], "settings": {}}
+                if "settings" not in data["image_generation"]:
+                    data["image_generation"]["settings"] = {}
+
+                # 保存风格设置
+                data["image_generation"]["settings"]["style"] = style
+
+                # 标记项目已修改
+                if hasattr(self.project_manager, 'mark_project_modified'):
+                    self.project_manager.mark_project_modified()
+
+                logger.info(f"风格设置已保存到项目: {style}")
+        except Exception as e:
+            logger.error(f"保存风格设置到项目失败: {e}")
+
+    def on_style_changed(self, style: str):
+        """风格选择改变时的处理"""
+        try:
+            # 保存所有设置到项目
+            self.save_all_settings_to_project()
+
+            # 调用原有的参数改变处理
+            self.on_parameter_changed()
+
+            logger.info(f"用户选择风格: {style}")
+        except Exception as e:
+            logger.error(f"处理风格改变失败: {e}")
+
+    def on_parameter_changed(self):
+        """参数改变时的处理"""
+        try:
+            # 保存所有设置到项目
+            self.save_all_settings_to_project()
+
+            # 启动自动保存定时器
+            if hasattr(self, 'auto_save_timer'):
+                self.auto_save_timer.start(self.auto_save_delay)
+
+        except Exception as e:
+            logger.error(f"处理参数改变失败: {e}")
+
+    def migrate_old_settings(self, old_settings: dict) -> dict:
+        """迁移旧设置格式到新格式"""
+        try:
+            new_settings = {}
+
+            # 引擎设置迁移
+            if "engine" in old_settings:
+                engine_display = old_settings["engine"]
+                # 将显示名称转换为引擎标识符
+                engine_mapping = {
+                    "CogView-3 Flash (免费)": "cogview_3_flash",
+                    "Pollinations AI (免费)": "pollinations",
+                    "ComfyUI本地": "comfyui_local",
+                    "ComfyUI云端": "comfyui_cloud"
+                }
+                new_settings["engine"] = engine_mapping.get(engine_display, "pollinations")
+
+            # 直接映射的设置
+            direct_mappings = [
+                "width", "height", "steps", "cfg_scale", "seed_mode",
+                "sampler", "negative_prompt", "retry_count", "delay"
+            ]
+            for key in direct_mappings:
+                if key in old_settings:
+                    new_settings[key] = old_settings[key]
+
+            # 添加默认值
+            if "style" not in new_settings:
+                new_settings["style"] = "电影风格"  # 默认风格
+            if "batch_size" not in new_settings:
+                new_settings["batch_size"] = 1
+            if "concurrent_tasks" not in new_settings:
+                new_settings["concurrent_tasks"] = 3
+
+            logger.info(f"迁移设置: {old_settings} -> {new_settings}")
+            return new_settings
+
+        except Exception as e:
+            logger.error(f"迁移旧设置失败: {e}")
+            return {}
+
+    def save_migrated_settings(self, settings: dict):
+        """保存迁移后的设置到新数据结构"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                return
+
+            project_data = self.project_manager.current_project
+
+            # 确保新数据结构存在
+            if hasattr(project_data, 'data'):
+                data = project_data.data
+            else:
+                if "data" not in project_data:
+                    project_data["data"] = {}
+                data = project_data["data"]
+
+            if "image_generation" not in data:
+                data["image_generation"] = {"images": [], "settings": {}}
+            if "settings" not in data["image_generation"]:
+                data["image_generation"]["settings"] = {}
+
+            # 保存迁移后的设置
+            data["image_generation"]["settings"].update(settings)
+
+            # 标记项目已修改
+            if hasattr(self.project_manager, 'mark_project_modified'):
+                self.project_manager.mark_project_modified()
+
+            logger.info("迁移后的设置已保存到新数据结构")
+
+        except Exception as e:
+            logger.error(f"保存迁移设置失败: {e}")
+
+    def on_project_loaded(self):
+        """项目加载时的处理"""
+        try:
+            # 重新加载所有设置
+            self.load_all_settings_from_project()
+
+            # 重新加载分镜数据
+            self.load_storyboard_data()
+
+            logger.info("项目加载完成，已重新加载所有设置和数据")
+        except Exception as e:
+            logger.error(f"处理项目加载失败: {e}")
 
     def receive_voice_data(self, voice_data_list):
         """接收来自配音模块的数据（配音优先工作流程）"""
@@ -343,14 +796,14 @@ class StoryboardImageGenerationTab(QWidget):
             main_content = dialogue_content if dialogue_content else voice_content
 
             if not main_content:
-                return "一个简单的场景, 动漫风格, 高质量"
+                return f"一个简单的场景, {self.get_selected_style()}, 高质量"
 
             # 创建简化的图像提示词
             return self._create_simple_image_prompt(main_content, scene_id)
 
         except Exception as e:
             logger.error(f"生成图像提示词失败: {e}")
-            return "一个简单的场景, 动漫风格, 高质量"
+            return f"一个简单的场景, {self.get_selected_style()}, 高质量"
 
     def _create_simple_image_prompt(self, content, scene_id):
         """创建简化的图像提示词"""
@@ -401,13 +854,13 @@ class StoryboardImageGenerationTab(QWidget):
                     break
 
             # 添加风格描述
-            style_suffix = ", 动漫风格, 高质量, 细节丰富, 温暖的色调"
+            style_suffix = f", {self.get_selected_style()}, 高质量, 细节丰富, 温暖的色调"
 
             return f"{base_description}{style_suffix}"
 
         except Exception as e:
             logger.error(f"创建简化图像提示词失败: {e}")
-            return "一个简单的温馨场景, 动漫风格, 高质量"
+            return f"一个简单的温馨场景, {self.get_selected_style()}, 高质量"
 
     def _detect_and_set_workflow_mode(self):
         """检测并设置工作流程模式"""
@@ -848,7 +1301,18 @@ class StoryboardImageGenerationTab(QWidget):
         self.seed_combo.addItems(["随机", "固定"])
         self.seed_combo.currentTextChanged.connect(self.on_parameter_changed)
         basic_layout.addRow("种子值:", self.seed_combo)
-        
+
+        # 风格选择
+        self.style_combo = QComboBox()
+        self.style_combo.addItems([
+            "电影风格", "动漫风格", "吉卜力风格", "赛博朋克风格",
+            "水彩插画风格", "像素风格", "写实摄影风格"
+        ])
+        # 从项目设置中加载风格，如果没有则使用默认值
+        self.load_style_from_project()
+        self.style_combo.currentTextChanged.connect(self.on_style_changed)
+        basic_layout.addRow("生成风格:", self.style_combo)
+
         # 高级参数（默认隐藏，仅非Pollinations引擎显示）
         self.steps_spin = QSpinBox()
         self.steps_spin.setRange(10, 100)
@@ -1587,11 +2051,11 @@ class StoryboardImageGenerationTab(QWidget):
                     return picture_desc
 
             # 如果都没有，返回默认描述
-            return "一个场景，动漫风格，高质量"
+            return f"一个场景，{self.get_selected_style()}，高质量"
 
         except Exception as e:
             logger.error(f"获取增强描述失败: {e}")
-            return "一个场景，动漫风格，高质量"
+            return f"一个场景，{self.get_selected_style()}，高质量"
 
     def _extract_picture_description(self, original_description: str) -> str:
         """🔧 新增：从original_description中提取画面描述部分"""
@@ -1717,7 +2181,7 @@ class StoryboardImageGenerationTab(QWidget):
         """🔧 新增：从配音数据生成备用描述"""
         try:
             if not voice_data:
-                return "一个场景，动漫风格，高质量"
+                return f"一个场景，{self.get_selected_style()}，高质量"
 
             # 获取配音内容
             voice_content = voice_data.get('voice_content', '')
@@ -1728,7 +2192,7 @@ class StoryboardImageGenerationTab(QWidget):
             main_content = dialogue_content if dialogue_content else voice_content
 
             if not main_content or len(main_content.strip()) < 5:
-                return "一个温馨的场景，动漫风格，高质量"
+                return f"一个温馨的场景，{self.get_selected_style()}，高质量"
 
             # 基于内容生成简单描述
             if '雪' in main_content or '冬' in main_content or '冷' in main_content:
@@ -1742,11 +2206,11 @@ class StoryboardImageGenerationTab(QWidget):
             else:
                 base_desc = "日常生活场景"
 
-            return f"{base_desc}，{main_content[:30]}，动漫风格，高质量，细节丰富"
+            return f"{base_desc}，{main_content[:30]}，{self.get_selected_style()}，高质量，细节丰富"
 
         except Exception as e:
             logger.error(f"从配音数据生成备用描述失败: {e}")
-            return "一个场景，动漫风格，高质量"
+            return f"一个场景，{self.get_selected_style()}，高质量"
 
     def _detect_and_set_workflow_mode(self):
         """🔧 新增：检测并设置工作流程模式"""
@@ -2432,7 +2896,7 @@ class StoryboardImageGenerationTab(QWidget):
                 # 构建正确的配置 - 根据ImageGenerationConfig的实际参数
                 generation_config = ImageGenerationConfig(
                     provider=provider,  # 使用用户选择的引擎
-                    style="电影风格",
+                    style=self.get_selected_style(),  # 使用用户选择的风格
                     width=config.get('width', 1024),
                     height=config.get('height', 1024),
                     steps=config.get('steps', 20),
@@ -2892,7 +3356,8 @@ class StoryboardImageGenerationTab(QWidget):
             'width': self.width_spin.value(),
             'height': self.height_spin.value(),
             'seed': self.get_seed_value(),
-            'batch_size': 1  # 固定为1，因为CogView-3 Flash不支持批量生成
+            'batch_size': 1,  # 固定为1，因为CogView-3 Flash不支持批量生成
+            'style': self.get_selected_style()  # 添加风格参数
         }
 
         # 根据引擎类型添加特定参数
@@ -3069,29 +3534,32 @@ class StoryboardImageGenerationTab(QWidget):
             current_row = self.storyboard_table.currentRow()
             if current_row < 0:
                 return
-                
+
             data_index = self.get_data_index_by_table_row(current_row)
             if data_index < 0:
                 return
-                
+
             shot_data = self.storyboard_data[data_index]
             current_image = self.preview_label.property('current_image_path')
-            
+
             if not current_image or not os.path.exists(current_image):
                 QMessageBox.warning(self, "警告", "没有可设置的图像")
                 return
-                
-            # 设置为主图
+
+            # 🔧 修复：设置为主图时，同时更新main_image_path和image_path
             shot_data['main_image_path'] = current_image
-            
+            shot_data['image_path'] = current_image  # 确保视频生成能正确获取主图
+
             # 更新表格中的主图显示
             self.create_main_image_widget(current_row, shot_data)
-            
+
             # 保存到项目数据
             self.save_main_image_to_project(shot_data)
-            
+
             QMessageBox.information(self, "成功", "已设为主图")
+            logger.info(f"主图设置成功: {shot_data.get('shot_id', '')} -> {current_image}")
         except Exception as e:
+            logger.error(f"设置主图失败: {e}")
             QMessageBox.critical(self, "错误", f"设置主图失败: {str(e)}")
 
     def delete_current_image(self):
@@ -4223,6 +4691,9 @@ class StoryboardImageGenerationTab(QWidget):
                     
                     # 触发引擎切换事件
                     self.on_engine_changed(self.engine_combo.currentText())
+
+                # 加载所有设置
+                self.load_all_settings_from_project()
         except Exception as e:
             logger.error(f"加载设置失败: {e}")
     
@@ -4774,15 +5245,25 @@ class StoryboardImageGenerationTab(QWidget):
             if not unified_key:
                 unified_key = f"{scene_id}_{shot_id}" if scene_id and shot_id else shot_data.get('sequence', 'unknown')
 
-            # 保存镜头图片映射信息
+            # 🔧 修复：保存镜头图片映射信息，确保主图路径正确传递
+            main_image_path = shot_data.get('main_image_path', '')
+            image_path = shot_data.get('image_path', '')
+
+            # 如果设置了主图，确保image_path也指向主图
+            if main_image_path and not image_path:
+                image_path = main_image_path
+            elif main_image_path and image_path != main_image_path:
+                # 如果主图和当前图片不一致，优先使用主图
+                image_path = main_image_path
+
             current_project['shot_image_mappings'][unified_key] = {
                 'scene_id': scene_id,
                 'shot_id': shot_id,
                 'scene_name': shot_data.get('scene_name', ''),
                 'shot_name': shot_data.get('shot_name', ''),
                 'sequence': shot_data.get('sequence', ''),
-                'main_image_path': shot_data.get('main_image_path', ''),
-                'image_path': shot_data.get('image_path', ''),
+                'main_image_path': main_image_path,
+                'image_path': image_path,  # 确保视频生成能正确获取主图
                 'generated_images': shot_data.get('generated_images', []),
                 'current_image_index': shot_data.get('current_image_index', 0),
                 'status': shot_data.get('status', '未生成'),

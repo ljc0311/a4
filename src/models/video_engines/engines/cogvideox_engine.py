@@ -64,36 +64,25 @@ class CogVideoXEngine(VideoGenerationEngine):
             if self.config.get('api_key'):
                 return self.config['api_key']
 
-            # 🔧 修复：优先从视频生成配置获取API密钥
-            try:
-                from config.video_generation_config import get_config
-                video_config = get_config()
-                cogvideox_config = video_config.get('engines', {}).get('cogvideox_flash', {})
-                api_key = cogvideox_config.get('api_key', '')
-                if api_key:
-                    logger.info("从视频生成配置获取到智谱AI密钥")
-                    return api_key
-            except Exception as video_config_error:
-                logger.warning(f"从视频配置获取API密钥失败: {video_config_error}")
-
-            # 备用方案：从配置文件中获取智谱AI密钥
-            from src.config.config_manager import ConfigManager
+            # 统一从ConfigManager获取智谱AI密钥
+            from src.utils.config_manager import ConfigManager
             config_manager = ConfigManager()
-
-            # 尝试从图像生成配置中获取智谱AI密钥
-            image_config = config_manager.get_image_generation_config()
-            for engine_name, engine_config in image_config.get('engines', {}).items():
-                if 'zhipu' in engine_name.lower() or 'cogview' in engine_name.lower():
-                    api_key = engine_config.get('api_key', '')
+            models = config_manager.get_models()
+            for model in models:
+                if model.get('type') == 'zhipu' or model.get('name') == '智谱AI':
+                    api_key = model.get('key', '')
                     if api_key:
-                        logger.info("使用智谱AI图像生成引擎的API密钥")
+                        logger.info("从ConfigManager获取到智谱AI密钥")
                         return api_key
 
-            # 尝试从其他配置中获取
-            all_config = config_manager.get_all_config()
-            zhipu_key = all_config.get('zhipu_api_key', '')
-            if zhipu_key:
-                return zhipu_key
+            # 备用方案：从环境变量获取
+            import os
+            api_key = os.getenv('ZHIPU_API_KEY')
+            if api_key:
+                logger.info("从环境变量获取到智谱AI密钥")
+                return api_key
+
+            logger.warning("未找到智谱AI API密钥，请在设置中配置")
 
             return ''
 

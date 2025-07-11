@@ -171,17 +171,36 @@ class ProjectDataStructure:
                     "engine": "edge_tts",
                     "voice": "zh-CN-XiaoxiaoNeural",
                     "speed": 1.0,
-                    "pitch": 1.0
+                    "pitch": 1.0,
+                    "volume": 1.0,
+                    "segment_duration": 10.0,  # 语音段时长控制
+                    "auto_split": True,  # 自动分割长文本
+                    "pause_duration": 0.5  # 段落间停顿时长
                 }
             },
-            
+
             # 图像生成数据
             "image_generation": {
                 "images": [],  # List[ImageData]
                 "settings": {
                     "engine": "pollinations",
                     "style": "动漫风格",
-                    "quality": "高质量"
+                    "quality": "高质量",
+                    "width": 1024,
+                    "height": 1024,
+                    "steps": 20,
+                    "cfg_scale": 7.5,
+                    "seed_mode": "随机",  # 随机 | 固定
+                    "fixed_seed": -1,
+                    "sampler": "DPM++ 2M Karras",
+                    "negative_prompt": "blurry, low quality, distorted",
+                    "batch_size": 1,
+                    "retry_count": 2,
+                    "delay": 1.0,
+                    "concurrent_tasks": 3,
+                    "model": "flux",  # 针对特定引擎的模型选择
+                    "enhance": False,  # Pollinations增强选项
+                    "logo": False  # Pollinations Logo选项
                 }
             },
 
@@ -191,9 +210,14 @@ class ProjectDataStructure:
                 "settings": {
                     "engine": "cogvideox_flash",
                     "duration": 5.0,
-                    "fps": 30,  # 修改为CogVideoX支持的帧率
+                    "fps": 30,
                     "motion_intensity": 0.5,
-                    "quality": "高质量"
+                    "quality": "高质量",
+                    "width": 1024,
+                    "height": 576,
+                    "aspect_ratio": "16:9",
+                    "loop_video": True,  # 视频循环以匹配音频时长
+                    "prompt_optimization": True  # 提示词优化
                 }
             },
             

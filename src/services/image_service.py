@@ -66,9 +66,15 @@ class ImageService(ServiceBase):
             if not prompt:
                 return ServiceResult(success=False, error="提示词不能为空")
             
-            # 应用风格预设
+            # 应用风格预设 - 智能处理避免重复
             if style in self.style_presets:
-                prompt = f"{prompt}, {self.style_presets[style]}"
+                style_preset = self.style_presets[style]
+                # 检查提示词中是否已经包含风格关键词
+                if not self._contains_style_keywords(prompt, style):
+                    prompt = f"{prompt}, {style_preset}"
+                    logger.info(f"为提示词添加风格预设: {style}")
+                else:
+                    logger.info(f"提示词中已包含{style}相关描述，跳过风格预设添加")
             
             # 根据不同提供商生成图像
             if api_config.provider.lower() == 'comfyui':
@@ -401,6 +407,31 @@ class ImageService(ServiceBase):
     def get_available_styles(self) -> List[str]:
         """获取可用的风格列表"""
         return list(self.style_presets.keys())
+
+    def _contains_style_keywords(self, prompt: str, style: str) -> bool:
+        """检查提示词中是否已包含特定风格的关键词"""
+        style_keywords = {
+            '电影风格': ['电影', 'cinematic', '胶片', 'film', '写实', 'photorealistic'],
+            '动漫风格': ['动漫', 'anime', '卡通', 'cartoon', '二次元'],
+            '吉卜力风格': ['吉卜力', 'ghibli', '宫崎骏', 'miyazaki'],  # 移除'奇幻'避免误判
+            '赛博朋克风格': ['赛博朋克', 'cyberpunk', '霓虹', 'neon', '未来'],
+            '水彩插画风格': ['水彩', 'watercolor', '插画', 'illustration', '手绘'],
+            '像素风格': ['像素', 'pixel', '8位', '8-bit', '复古'],
+            '写实摄影风格': ['写实', 'photorealistic', '摄影', 'photography', '真实']
+        }
+
+        if style not in style_keywords:
+            return False
+
+        prompt_lower = prompt.lower()
+        keywords = style_keywords[style]
+
+        # 检查是否包含任何关键词
+        for keyword in keywords:
+            if keyword.lower() in prompt_lower:
+                return True
+
+        return False
     
     def add_style_preset(self, name: str, prompt_suffix: str):
         """添加风格预设"""

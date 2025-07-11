@@ -908,9 +908,10 @@ class VideoGenerationTab(QWidget):
                 for key in possible_keys:
                     if key in shot_image_mappings:
                         img_data = shot_image_mappings[key]
-                        image_path = img_data.get('image_path', '') or img_data.get('main_image_path', '')
+                        # 🔧 修复：优先获取主图路径，确保视频生成使用用户选择的主图
+                        image_path = img_data.get('main_image_path', '') or img_data.get('image_path', '')
                         image_status = img_data.get('status', '未生成')
-                        logger.debug(f"从shot_image_mappings找到图像: {key} -> {image_path}")
+                        logger.debug(f"从shot_image_mappings找到图像: {key} -> {image_path} (主图优先)")
                         break
 
             # 方法2：从image_generation获取
@@ -918,7 +919,8 @@ class VideoGenerationTab(QWidget):
                 if shot_id in image_generation:
                     image_data = image_generation[shot_id]
                     if isinstance(image_data, dict):
-                        image_path = image_data.get('image_path', '')
+                        # 🔧 修复：优先获取主图路径
+                        image_path = image_data.get('main_image_path', '') or image_data.get('image_path', '')
                         image_status = image_data.get('status', '未生成')
                     elif isinstance(image_data, str):
                         image_path = image_data
@@ -929,7 +931,8 @@ class VideoGenerationTab(QWidget):
                 images_list = image_generation.get('images', [])
                 for img in images_list:
                     if isinstance(img, dict) and img.get('shot_id') == shot_id:
-                        image_path = img.get('image_path', '')
+                        # 🔧 修复：优先获取主图路径
+                        image_path = img.get('main_image_path', '') or img.get('image_path', '')
                         image_status = img.get('status', '未生成')
                         break
 
@@ -1408,7 +1411,8 @@ class VideoGenerationTab(QWidget):
 
         # 方法2：如果没找到，尝试从shot数据本身获取
         if not image_found and isinstance(shot, dict):
-            image_path = shot.get('image_path') or shot.get('main_image_path', '')
+            # 🔧 修复：优先获取主图路径
+            image_path = shot.get('main_image_path', '') or shot.get('image_path', '')
             if image_path and os.path.exists(image_path):
                 scene_data['image_path'] = image_path
                 image_found = True
@@ -1522,7 +1526,8 @@ class VideoGenerationTab(QWidget):
         scene_images = []
         for image in images:
             if image.get('shot_id') == shot_id:
-                image_path = image.get('image_path', '')
+                # 🔧 修复：优先获取主图路径
+                image_path = image.get('main_image_path', '') or image.get('image_path', '')
                 if image_path and os.path.exists(image_path):
                     scene_images.append({
                         'path': image_path,

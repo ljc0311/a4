@@ -8,6 +8,7 @@ AI视频生成器主程序
 import sys
 import os
 import atexit
+import traceback
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt
 

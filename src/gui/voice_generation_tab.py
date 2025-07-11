@@ -218,6 +218,13 @@ class VoiceGenerationTab(QWidget):
         
         self.init_ui()
         self.apply_styles()
+
+        # 加载项目设置
+        self.load_voice_settings_from_project()
+
+        # 连接项目管理器信号（如果存在）
+        if self.project_manager and hasattr(self.project_manager, 'project_loaded'):
+            self.project_manager.project_loaded.connect(self.on_project_loaded)
         # 延迟加载项目数据，避免初始化时卡住
         QTimer.singleShot(100, self.load_project_data)
     
@@ -587,6 +594,7 @@ class VoiceGenerationTab(QWidget):
         for engine_id, engine_name in engines:
             self.engine_combo.addItem(engine_name, engine_id)
         self.engine_combo.currentTextChanged.connect(self.on_engine_changed)
+        self.engine_combo.currentTextChanged.connect(self.on_voice_settings_changed)
         engine_layout.addRow("配音引擎:", self.engine_combo)
 
         # 初始化时触发引擎改变事件，加载音色列表
@@ -594,6 +602,7 @@ class VoiceGenerationTab(QWidget):
 
         # 音色选择
         self.voice_combo = QComboBox()
+        self.voice_combo.currentTextChanged.connect(self.on_voice_settings_changed)
         engine_layout.addRow("音色:", self.voice_combo)
 
         # 语速设置
@@ -606,6 +615,7 @@ class VoiceGenerationTab(QWidget):
         self.speed_slider.valueChanged.connect(
             lambda v: self.speed_label.setText(f"{v}%")
         )
+        self.speed_slider.valueChanged.connect(self.on_voice_settings_changed)
         speed_layout = QHBoxLayout()
         speed_layout.setSpacing(8)
         speed_layout.addWidget(self.speed_slider)
@@ -4867,6 +4877,168 @@ class VoiceGenerationTab(QWidget):
                 except json.JSONDecodeError:
                     logger.warning(f"AI响应JSON解析失败: {response}")
                     return None
+        except Exception as e:
+            logger.error(f"智能分割失败: {e}")
+            return None
+
+    def save_voice_settings_to_project(self):
+        """保存配音设置到项目"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                return
+
+            project_data = self.project_manager.current_project
+
+            # 兼容不同的项目数据结构
+            if hasattr(project_data, 'data'):
+                data = project_data.data
+            else:
+                if "data" not in project_data:
+                    project_data["data"] = {}
+                data = project_data["data"]
+
+            # 确保配音设置结构存在
+            if "voice_generation" not in data:
+                data["voice_generation"] = {"segments": [], "settings": {}}
+            if "settings" not in data["voice_generation"]:
+                data["voice_generation"]["settings"] = {}
+
+            settings = data["voice_generation"]["settings"]
+
+            # 保存所有配音设置
+            if hasattr(self, 'engine_combo'):
+                current_engine_data = self.engine_combo.currentData()
+                if current_engine_data:
+                    settings["engine"] = current_engine_data
+                else:
+                    settings["engine"] = "edge_tts"
+
+            if hasattr(self, 'voice_combo'):
+                settings["voice"] = self.voice_combo.currentText()
+
+            if hasattr(self, 'speed_slider'):
+                settings["speed"] = self.speed_slider.value() / 100.0  # 转换为倍数
+
+            if hasattr(self, 'pitch_slider'):
+                settings["pitch"] = self.pitch_slider.value() / 100.0
+
+            if hasattr(self, 'volume_slider'):
+                settings["volume"] = self.volume_slider.value() / 100.0
+
+            if hasattr(self, 'target_duration'):
+                settings["segment_duration"] = self.target_duration
+
+            # 标记项目已修改
+            if hasattr(self.project_manager, 'mark_project_modified'):
+                self.project_manager.mark_project_modified()
+
+            logger.info("配音设置已保存到项目")
+        except Exception as e:
+            logger.error(f"保存配音设置到项目失败: {e}")
+
+    def load_voice_settings_from_project(self):
+        """从项目设置中加载配音设置"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                logger.info("无项目，使用默认配音设置")
+                return
+
+            project_data = self.project_manager.current_project
+
+            # 兼容不同的项目数据结构
+            if hasattr(project_data, 'data'):
+                data = project_data.data
+            else:
+                data = project_data.get("data", project_data)
+
+            voice_settings = data.get("voice_generation", {}).get("settings", {})
+
+            if not voice_settings:
+                logger.info("项目中无配音设置，使用默认设置")
+                return
+
+            # 阻止信号触发，避免在加载时保存设置
+            self.block_voice_signals(True)
+
+            # 加载引擎设置
+            if hasattr(self, 'engine_combo') and "engine" in voice_settings:
+                engine = voice_settings["engine"]
+                for i in range(self.engine_combo.count()):
+                    if self.engine_combo.itemData(i) == engine:
+                        self.engine_combo.setCurrentIndex(i)
+                        break
+
+            # 加载音色设置
+            if hasattr(self, 'voice_combo') and "voice" in voice_settings:
+                voice = voice_settings["voice"]
+                # 先触发引擎改变以加载音色列表
+                self.on_engine_changed()
+                # 然后设置音色
+                for i in range(self.voice_combo.count()):
+                    if self.voice_combo.itemText(i) == voice:
+                        self.voice_combo.setCurrentIndex(i)
+                        break
+
+            # 加载语速设置
+            if hasattr(self, 'speed_slider') and "speed" in voice_settings:
+                speed_value = int(voice_settings["speed"] * 100)  # 转换为百分比
+                self.speed_slider.setValue(speed_value)
+                if hasattr(self, 'speed_label'):
+                    self.speed_label.setText(f"{speed_value}%")
+
+            # 加载音调设置
+            if hasattr(self, 'pitch_slider') and "pitch" in voice_settings:
+                pitch_value = int(voice_settings["pitch"] * 100)
+                self.pitch_slider.setValue(pitch_value)
+
+            # 加载音量设置
+            if hasattr(self, 'volume_slider') and "volume" in voice_settings:
+                volume_value = int(voice_settings["volume"] * 100)
+                self.volume_slider.setValue(volume_value)
+
+            # 加载段落时长设置
+            if "segment_duration" in voice_settings:
+                self.target_duration = voice_settings["segment_duration"]
+
+            # 恢复信号
+            self.block_voice_signals(False)
+
+            logger.info("从项目设置加载配音设置")
+
+        except Exception as e:
+            logger.error(f"加载项目配音设置失败: {e}")
+            self.block_voice_signals(False)
+
+    def block_voice_signals(self, block: bool):
+        """阻止或恢复配音UI组件信号"""
+        components = [
+            'engine_combo', 'voice_combo', 'speed_slider',
+            'pitch_slider', 'volume_slider'
+        ]
+
+        for component_name in components:
+            if hasattr(self, component_name):
+                component = getattr(self, component_name)
+                if hasattr(component, 'blockSignals'):
+                    component.blockSignals(block)
+
+    def on_voice_settings_changed(self):
+        """配音设置改变时的处理"""
+        try:
+            # 保存设置到项目
+            self.save_voice_settings_to_project()
+        except Exception as e:
+            logger.error(f"处理配音设置改变失败: {e}")
+
+    def on_project_loaded(self):
+        """项目加载时的处理"""
+        try:
+            # 重新加载配音设置
+            self.load_voice_settings_from_project()
+
+            logger.info("项目加载完成，已重新加载配音设置")
+        except Exception as e:
+            logger.error(f"处理项目加载失败: {e}")
 
             return None
 

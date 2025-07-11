@@ -302,18 +302,23 @@ class CogVideoXPromptOptimizer:
 
     def _clean_for_video(self, image_prompt: str) -> str:
         """清理图像提示词以适合视频生成，保留核心内容"""
-        # 移除静态描述词，但保留核心内容
+        # 移除静态描述词和技术参数
         static_terms = [
             '静止的画面中', '画面静止', '静谧', '静态构图', 'static composition',
             '水彩画风', '柔和笔触', '粉彩色调', '插画风格', '温柔的氛围',
             '三分法构图', '对称构图', '对角线构图', '构图更显',
             '电影感', '超写实', '4K画质', '胶片颗粒感', '景深效果',
-            '技术细节补充', '画面遵循'
+            '技术细节补充', '画面遵循', '静止'
         ]
 
         cleaned = image_prompt
+
+        # 移除技术参数部分（如：：中景; 平视; 静止; 人工光; 对称）
+        cleaned = re.sub(r'：[^，。；;]*?[;；][^，。；;]*?[;；][^，。；;]*?[;；][^，。；;]*?[;；][^，。；;]*', '', cleaned)
+        cleaned = re.sub(r'：[^，。；;]*', '', cleaned)  # 移除剩余的技术参数
+
+        # 移除静态描述词
         for term in static_terms:
-            # 使用更精确的替换，避免误删重要内容
             cleaned = re.sub(f'{re.escape(term)}[，。；;]*', '', cleaned)
 
         # 移除多余的标点和空格，但保持基本结构
@@ -332,13 +337,13 @@ class CogVideoXPromptOptimizer:
             # 保留原始内容作为基础
             base_content = cleaned_content.strip()
 
-            # 根据时长添加运动描述
+            # 根据时长添加运动描述（避免重复）
             if duration <= 3:
-                motion_desc = "with subtle movements"
+                motion_desc = "subtle natural movements"
             elif duration <= 6:
-                motion_desc = "with gentle, flowing movements"
+                motion_desc = "gentle flowing motion"
             else:
-                motion_desc = "with smooth, continuous movements"
+                motion_desc = "smooth continuous motion"
 
             # 将运动描述融入原始内容
             main_desc = f"{base_content}, {motion_desc}"
@@ -387,35 +392,45 @@ class CogVideoXPromptOptimizer:
 
             parts.append(f"A peaceful scene with {motion_desc}")
 
-        # 添加摄像机运动（适合视频）
-        camera_movements = [
-            'smooth camera movement',
-            'gentle camera panning',
-            'steady camera motion',
-            'natural camera flow'
-        ]
-        camera = camera_movements[0]  # 可以根据场景类型选择
-        parts.append(camera)
+        # 添加摄像机运动（根据时长选择）
+        if duration <= 3:
+            camera_desc = "steady camera"
+        elif duration <= 6:
+            camera_desc = "gentle camera panning"
+        else:
+            camera_desc = "dynamic camera movement"
 
-        # 添加视频质量描述
-        parts.append("cinematic quality, natural motion")
+        parts.append(camera_desc)
+
+        # 添加基础视频质量描述（避免重复）
+        parts.append("cinematic quality")
 
         return '. '.join(parts)
 
     def _add_video_quality_descriptors(self, prompt: str) -> str:
-        """添加视频质量描述符"""
-        # 视频专用质量描述符
-        video_quality_parts = [
-            "smooth motion",
-            "natural movement",
-            "cinematic flow",
-            "high quality video",
-            "stable footage",
-            "professional cinematography"
-        ]
+        """添加视频质量描述符，避免重复"""
+        # 检查已有的关键词，避免重复
+        existing_keywords = prompt.lower()
 
-        quality_str = ', '.join(video_quality_parts[:4])  # 选择前4个避免过长
-        return f"{prompt}. {quality_str}"
+        # 视频专用质量描述符
+        video_quality_parts = []
+
+        # 只添加不重复的描述符
+        if 'motion' not in existing_keywords and 'movement' not in existing_keywords:
+            video_quality_parts.append("fluid motion")
+
+        if 'cinematic' not in existing_keywords:
+            video_quality_parts.append("cinematic flow")
+
+        if 'quality' not in existing_keywords:
+            video_quality_parts.append("high quality video")
+
+        # 总是添加的专业描述符
+        video_quality_parts.extend(["stable footage", "professional grade"])
+
+        # 限制长度，选择最重要的3-4个
+        quality_str = ', '.join(video_quality_parts[:4])
+        return f"{prompt}. {quality_str}" if quality_str else prompt
 
     def _basic_video_optimization(self, image_prompt: str) -> str:
         """基础视频优化（备用方案）"""

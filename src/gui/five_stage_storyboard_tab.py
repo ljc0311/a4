@@ -1927,7 +1927,26 @@ class FiveStageStoryboardTab(QWidget):
         export_btn = QPushButton("💾 导出分镜脚本")
         export_btn.clicked.connect(self.export_storyboard)
         btn_layout.addWidget(export_btn)
-        
+
+        # 刷新数据按钮
+        refresh_btn = QPushButton("🔄 刷新数据")
+        refresh_btn.clicked.connect(self.refresh_project_data)
+        refresh_btn.setToolTip("重新加载项目数据，如果有新增的场景分镜会显示出来")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        btn_layout.addWidget(refresh_btn)
+
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
         
@@ -2677,8 +2696,9 @@ class FiveStageStoryboardTab(QWidget):
                 # 存储分镜结果供增强描述使用
                 self.current_storyboard_results = result.get("storyboard_results", [])
 
-                # 🔧 修复：第四阶段完成后跳转到配音制作，而不是图像生成
-                QTimer.singleShot(1000, self._jump_to_voice_generation)
+                # 🔧 修复：第四阶段完成后不立即跳转，等待增强描述完成
+                # QTimer.singleShot(1000, self._jump_to_voice_generation)  # 注释掉自动跳转
+                logger.info("分镜脚本生成完成，请进行增强描述后再跳转到配音制作")
 
             elif stage_num == 5:
                 self._display_optimization_results(result.get("optimization_suggestions", []))
@@ -3248,6 +3268,10 @@ class FiveStageStoryboardTab(QWidget):
                 # 更新UI状态
                 self.enhance_description_btn.setText("✅ 增强完成")
                 self.status_label.setText("✅ 描述增强完成")
+
+                # 🔧 新增：增强描述完成后跳转到配音制作界面
+                QTimer.singleShot(1500, self._jump_to_voice_generation)
+                logger.info("增强描述完成，将跳转到配音制作界面")
             else:
                 self.enhance_description_btn.setText("❌ 增强失败")
                 self.status_label.setText("❌ 增强描述失败")
@@ -3578,15 +3602,54 @@ class FiveStageStoryboardTab(QWidget):
                     if result.get("scene_index") == scene_index:
                         result["storyboard_script"] = response
                         logger.info(f"第{scene_index+1}个场景分镜重试成功")
+
+                        # 🔧 修复：重试成功后立即保存文件
+                        try:
+                            self._save_storyboard_scripts_to_files([result])
+                            logger.info(f"第{scene_index+1}个场景分镜文件已更新保存")
+                        except Exception as save_error:
+                            logger.error(f"保存第{scene_index+1}个场景分镜文件失败: {save_error}")
+
+                        # 🔧 新增：重试成功后立即更新项目数据
+                        try:
+                            self._update_project_storyboard_data()
+                            logger.info(f"第{scene_index+1}个场景项目数据已同步更新")
+                        except Exception as sync_error:
+                            logger.error(f"同步第{scene_index+1}个场景项目数据失败: {sync_error}")
+
                         return True
 
                 # 如果没有找到，添加新的结果
-                self.current_storyboard_results.append({
+                new_result = {
                     "scene_index": scene_index,
                     "scene_info": scene_info,
                     "storyboard_script": response
-                })
+                }
+                self.current_storyboard_results.append(new_result)
+
+                # 🔧 新增：保存新增的分镜文件
+                try:
+                    self._save_storyboard_scripts_to_files([new_result])
+                    logger.info(f"第{scene_index+1}个场景分镜文件已新增保存")
+                except Exception as save_error:
+                    logger.error(f"保存第{scene_index+1}个场景分镜文件失败: {save_error}")
+
+                # 🔧 新增：更新项目数据
+                try:
+                    self._update_project_storyboard_data()
+                    logger.info(f"第{scene_index+1}个场景项目数据已同步更新")
+                except Exception as sync_error:
+                    logger.error(f"同步第{scene_index+1}个场景项目数据失败: {sync_error}")
+                self.current_storyboard_results.append(new_result)
                 logger.info(f"第{scene_index+1}个场景分镜重试成功（新增）")
+
+                # 🔧 修复：重试成功后立即保存文件
+                try:
+                    self._save_storyboard_scripts_to_files([new_result])
+                    logger.info(f"第{scene_index+1}个场景分镜文件已保存")
+                except Exception as save_error:
+                    logger.error(f"保存第{scene_index+1}个场景分镜文件失败: {save_error}")
+
                 return True
 
             return False
@@ -5763,6 +5826,98 @@ class FiveStageStoryboardTab(QWidget):
 
         except Exception as e:
             logger.error(f"刷新场景数据失败: {e}")
+
+    def refresh_project_data(self):
+        """刷新项目数据（重新加载所有数据）"""
+        try:
+            logger.info("🔄 开始刷新项目数据...")
+
+            # 显示进度提示
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("🔄 正在刷新项目数据...")
+
+            # 简化版本：只重新加载项目数据
+            try:
+                self.load_from_project(force_load=True)
+                logger.info("✅ 项目数据重新加载完成")
+            except Exception as load_error:
+                logger.error(f"重新加载项目数据失败: {load_error}")
+                raise load_error
+
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("✅ 项目数据刷新完成")
+            logger.info("✅ 项目数据刷新完成")
+
+            # 显示成功消息
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(self, "刷新完成", "项目数据已成功刷新！\n\n请检查分镜显示是否已更新。")
+
+        except Exception as e:
+            logger.error(f"刷新项目数据失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
+
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"❌ 刷新失败")
+
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "刷新失败", f"刷新项目数据时出错：\n\n{str(e)}\n\n请查看日志获取详细信息。")
+
+    def _update_project_storyboard_data(self):
+        """更新项目中的分镜数据（通用方法）"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                logger.warning("没有当前项目，无法更新分镜数据")
+                return False
+
+            # 获取当前项目数据
+            project_data = self.project_manager.get_project_data()
+            if not project_data:
+                logger.warning("无法获取项目数据")
+                return False
+
+            # 确保五阶段数据结构存在
+            if 'five_stage_storyboard' not in project_data:
+                project_data['five_stage_storyboard'] = {}
+
+            five_stage_data = project_data['five_stage_storyboard']
+            if 'stage_data' not in five_stage_data:
+                five_stage_data['stage_data'] = {}
+
+            stage_data = five_stage_data['stage_data']
+            if '4' not in stage_data:
+                stage_data['4'] = {}
+
+            stage4_data = stage_data['4']
+
+            # 更新分镜结果
+            if hasattr(self, 'current_storyboard_results') and self.current_storyboard_results:
+                stage4_data['storyboard_results'] = self.current_storyboard_results
+                logger.info(f"已更新项目数据中的分镜结果，共 {len(self.current_storyboard_results)} 个场景")
+
+            # 清空失败场景（因为重试成功了）
+            if hasattr(self, 'failed_scenes'):
+                # 只移除已经成功重试的场景
+                successful_scene_indices = {result.get('scene_index') for result in self.current_storyboard_results}
+                remaining_failed = [
+                    failed for failed in self.failed_scenes
+                    if failed.get('scene_index') not in successful_scene_indices
+                ]
+                stage4_data['failed_scenes'] = remaining_failed
+                logger.info(f"已更新失败场景列表，剩余 {len(remaining_failed)} 个失败场景")
+
+            # 保存项目数据
+            success = self.project_manager.save_project_data(project_data)
+            if success:
+                logger.info("项目分镜数据已成功同步保存")
+                return True
+            else:
+                logger.error("保存项目分镜数据失败")
+                return False
+
+        except Exception as e:
+            logger.error(f"更新项目分镜数据失败: {e}")
+            return False
     
     def _smart_auto_extract_characters(self, world_bible_text):
         """智能自动提取角色信息：新建项目时自动提取，已有数据时询问用户"""

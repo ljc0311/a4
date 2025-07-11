@@ -442,6 +442,15 @@ class CogView3FlashEngine(ImageGenerationEngine):
             else:
                 logger.error(f"CogView-3 Flash请求失败: HTTP {response.status_code}")
                 logger.error(f"响应内容: {response.text}")
+
+                # 特殊处理常见错误
+                if response.status_code == 401:
+                    logger.error("API密钥无效或已过期，请检查智谱AI密钥配置")
+                elif response.status_code == 429:
+                    logger.error("API请求频率超限，请稍后重试")
+                elif response.status_code == 500:
+                    logger.error("CogView-3 Flash服务内部错误，建议切换到其他引擎")
+
                 return None
 
         except Exception as e:

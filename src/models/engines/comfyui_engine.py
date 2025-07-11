@@ -92,8 +92,12 @@ class ComfyUIBaseEngine(ImageGenerationEngine):
         try:
             # 不在初始化时创建目录，只在实际生成图像时创建
 
-            # 创建HTTP会话 - 不在初始化时设置超时，避免异步上下文问题
-            self.session = aiohttp.ClientSession()
+            # 创建HTTP会话 - 配置代理绕过以确保本地连接正常
+            connector = aiohttp.TCPConnector()
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                trust_env=False  # 不使用环境变量中的代理设置
+            )
 
             # 测试连接
             if await self.test_connection():
@@ -114,17 +118,21 @@ class ComfyUIBaseEngine(ImageGenerationEngine):
     async def test_connection(self) -> bool:
         """测试连接"""
         try:
-            if not self.session:
-                return False
+            # 使用同步的代理绕过工具进行连接测试，确保一致性
+            from src.utils.proxy_bypass import proxy_bypass
 
-            # 测试ComfyUI API - 尝试获取队列状态
-            async with self.session.get(f"{self.api_url}/queue") as response:
-                if response.status == 200:
-                    logger.info(f"ComfyUI连接测试成功: {self.api_url}")
-                    return True
-                else:
-                    logger.error(f"ComfyUI连接测试失败: HTTP {response.status}")
-                    return False
+            response = proxy_bypass.requests_get(
+                f"{self.api_url}/queue",
+                bypass_proxy=True,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                logger.info(f"ComfyUI连接测试成功: {self.api_url}")
+                return True
+            else:
+                logger.error(f"ComfyUI连接测试失败: HTTP {response.status_code}")
+                return False
 
         except Exception as e:
             logger.error(f"ComfyUI连接测试失败: {e}")
@@ -192,7 +200,11 @@ class ComfyUIBaseEngine(ImageGenerationEngine):
             # 如果会话不存在或已关闭，重新创建
             if not self.session or self.session.closed:
                 logger.info("重新创建ComfyUI HTTP会话")
-                self.session = aiohttp.ClientSession()
+                connector = aiohttp.TCPConnector()
+                self.session = aiohttp.ClientSession(
+                    connector=connector,
+                    trust_env=False  # 不使用环境变量中的代理设置
+                )
 
         except Exception as e:
             logger.warning(f"确保ComfyUI会话有效时出错: {e}")
@@ -203,7 +215,11 @@ class ComfyUIBaseEngine(ImageGenerationEngine):
                 except Exception:
                     pass
 
-            self.session = aiohttp.ClientSession()
+            connector = aiohttp.TCPConnector()
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                trust_env=False  # 不使用环境变量中的代理设置
+            )
 
     async def generate(self, config: GenerationConfig,
                       progress_callback: Optional[Callable] = None,

@@ -124,19 +124,22 @@ class CogVideoXPromptOptimizer:
             优化后的视频生成提示词
         """
         try:
-            # 清理图像提示词，移除静态描述
+            # 清理图像提示词，移除静态描述但保留核心内容
             cleaned_prompt = self._clean_for_video(image_prompt)
 
             # 提取关键信息
             scene_info = self._extract_scene_info(cleaned_prompt, shot_info)
 
-            # 构建视频专用提示词
-            video_prompt = self._build_video_prompt(scene_info, duration)
+            # 构建视频专用提示词，传递清理后的内容
+            video_prompt = self._build_video_prompt(scene_info, duration, cleaned_prompt)
 
             # 添加视频质量描述
             final_prompt = self._add_video_quality_descriptors(video_prompt)
 
             logger.info(f"视频提示词优化完成: {len(image_prompt)} -> {len(final_prompt)} 字符")
+            logger.debug(f"原始: {image_prompt}")
+            logger.debug(f"清理后: {cleaned_prompt}")
+            logger.debug(f"最终: {final_prompt}")
             return final_prompt
 
         except Exception as e:
@@ -298,35 +301,65 @@ class CogVideoXPromptOptimizer:
         return result
 
     def _clean_for_video(self, image_prompt: str) -> str:
-        """清理图像提示词以适合视频生成"""
-        # 移除静态描述词
+        """清理图像提示词以适合视频生成，保留核心内容"""
+        # 移除静态描述词，但保留核心内容
         static_terms = [
-            '静止', '画面静止', '静谧', '静态', 'static', 'still',
-            '水彩画风', '柔和笔触', '粉彩色', '插画', '温柔',
-            '三分法构图', '对称构图', '对角线构图',
-            '电影感', '超写实', '4K', '胶片颗粒', '景深',
-            '技术细节补充', '全景', '中景', '特写', '平视', '俯视', '侧面'
+            '静止的画面中', '画面静止', '静谧', '静态构图', 'static composition',
+            '水彩画风', '柔和笔触', '粉彩色调', '插画风格', '温柔的氛围',
+            '三分法构图', '对称构图', '对角线构图', '构图更显',
+            '电影感', '超写实', '4K画质', '胶片颗粒感', '景深效果',
+            '技术细节补充', '画面遵循'
         ]
 
         cleaned = image_prompt
         for term in static_terms:
-            cleaned = re.sub(f'{term}[；;，,。.]*', '', cleaned)
+            # 使用更精确的替换，避免误删重要内容
+            cleaned = re.sub(f'{re.escape(term)}[，。；;]*', '', cleaned)
 
-        # 移除多余的标点和空格
-        cleaned = re.sub(r'[，。；;]+', ', ', cleaned)
+        # 移除多余的标点和空格，但保持基本结构
+        cleaned = re.sub(r'[，。；;]{2,}', '，', cleaned)  # 多个标点符号合并为一个
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        cleaned = re.sub(r'^[，。；;]+|[，。；;]+$', '', cleaned)  # 移除开头结尾的标点
 
         return cleaned
 
-    def _build_video_prompt(self, scene_info: Dict, duration: float) -> str:
-        """构建视频专用提示词"""
+    def _build_video_prompt(self, scene_info: Dict, duration: float, cleaned_content: str = "") -> str:
+        """构建视频专用提示词，保留原始内容"""
         parts = []
 
-        # 主要动作描述
-        if scene_info['characters'] and scene_info['actions']:
-            character = scene_info['characters'][0]
-            action = scene_info['actions'][0] if scene_info['actions'] else 'moves naturally'
-            scene = scene_info['scene'] or 'in a peaceful environment'
+        # 如果有清理后的内容，优先使用
+        if cleaned_content and cleaned_content.strip():
+            # 保留原始内容作为基础
+            base_content = cleaned_content.strip()
+
+            # 根据时长添加运动描述
+            if duration <= 3:
+                motion_desc = "with subtle movements"
+            elif duration <= 6:
+                motion_desc = "with gentle, flowing movements"
+            else:
+                motion_desc = "with smooth, continuous movements"
+
+            # 将运动描述融入原始内容
+            main_desc = f"{base_content}, {motion_desc}"
+            parts.append(main_desc)
+
+        elif scene_info['characters'] or scene_info['scene'] or scene_info['actions']:
+            # 如果没有原始内容，但有提取的场景信息，构建描述
+            scene_elements = []
+
+            if scene_info['characters']:
+                scene_elements.append(scene_info['characters'][0])
+
+            if scene_info['actions']:
+                action = scene_info['actions'][0]
+            else:
+                action = 'moves naturally'
+
+            if scene_info['scene']:
+                scene_location = scene_info['scene']
+            else:
+                scene_location = 'in a peaceful environment'
 
             # 根据时长调整动作描述
             if duration <= 3:
@@ -336,28 +369,36 @@ class CogVideoXPromptOptimizer:
             else:
                 motion_desc = "with smooth, continuous movements"
 
-            main_desc = f"{character} {action} {scene} {motion_desc}"
+            # 组合场景描述
+            if scene_elements:
+                main_desc = f"{' '.join(scene_elements)} {action} {scene_location} {motion_desc}"
+            else:
+                main_desc = f"A scene {scene_location} with natural {action} {motion_desc}"
+
             parts.append(main_desc)
+        else:
+            # 最后的备用方案
+            if duration <= 3:
+                motion_desc = "subtle movements"
+            elif duration <= 6:
+                motion_desc = "gentle, flowing movements"
+            else:
+                motion_desc = "smooth, continuous movements"
+
+            parts.append(f"A peaceful scene with {motion_desc}")
 
         # 添加摄像机运动（适合视频）
         camera_movements = [
-            'The camera slowly pans to follow the action',
-            'Gentle camera movement captures the scene',
-            'Smooth camera motion reveals details',
-            'The camera maintains steady focus'
+            'smooth camera movement',
+            'gentle camera panning',
+            'steady camera motion',
+            'natural camera flow'
         ]
         camera = camera_movements[0]  # 可以根据场景类型选择
         parts.append(camera)
 
-        # 添加动态光照
-        lighting_effects = [
-            'Natural lighting shifts subtly',
-            'Soft light creates gentle shadows',
-            'Warm light enhances the atmosphere',
-            'Dynamic lighting adds depth'
-        ]
-        lighting = lighting_effects[0]
-        parts.append(lighting)
+        # 添加视频质量描述
+        parts.append("cinematic quality, natural motion")
 
         return '. '.join(parts)
 

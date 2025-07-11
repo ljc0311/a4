@@ -516,9 +516,21 @@ class VideoCompositionTab(QWidget):
     def load_project_data(self):
         """加载项目数据"""
         try:
-            if not self.project_manager or not self.project_manager.current_project:
-                logger.warning("没有当前项目，无法加载视频合成数据")
+            if not self.project_manager:
+                logger.warning("项目管理器未初始化")
                 return
+
+            # 🔧 修复：如果没有当前项目，尝试重新获取
+            if not self.project_manager.current_project:
+                logger.info("没有当前项目，尝试重新获取项目列表")
+                # 刷新项目列表
+                self.project_manager.refresh_project_list()
+
+                # 如果仍然没有项目，显示提示
+                if not self.project_manager.current_project:
+                    logger.warning("没有当前项目，无法加载视频合成数据")
+                    self.show_no_project_message()
+                    return
 
             project_data = self.project_manager.current_project
             project_dir = project_data.get('project_dir', '')
@@ -526,6 +538,8 @@ class VideoCompositionTab(QWidget):
             if not project_dir:
                 logger.warning("项目目录不存在")
                 return
+
+            logger.info(f"开始加载项目数据: {project_data.get('project_name', 'Unknown')}")
 
             # 加载视频片段
             self.load_video_segments(project_dir)
@@ -540,6 +554,31 @@ class VideoCompositionTab(QWidget):
 
         except Exception as e:
             logger.error(f"加载视频合成数据失败: {e}")
+
+    def show_no_project_message(self):
+        """显示无项目提示"""
+        try:
+            # 清空表格
+            self.segments_table.setRowCount(0)
+
+            # 在状态标签中显示提示
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("请先选择一个项目")
+
+            logger.info("显示无项目提示")
+
+        except Exception as e:
+            logger.error(f"显示无项目提示失败: {e}")
+
+    def showEvent(self, event):
+        """页面显示时的事件处理"""
+        super().showEvent(event)
+        try:
+            # 页面显示时重新加载项目数据
+            logger.info("视频合成页面显示，重新加载项目数据")
+            self.load_project_data()
+        except Exception as e:
+            logger.error(f"页面显示时加载数据失败: {e}")
 
     def load_video_segments(self, project_dir: str):
         """加载视频片段"""
@@ -566,12 +605,15 @@ class VideoCompositionTab(QWidget):
             # 使用视频列表创建视频片段对象，并按镜头顺序排序
             video_segments_dict = {}
 
-            for video_data in videos_list:
+            for i, video_data in enumerate(videos_list):
                 if not isinstance(video_data, dict):
+                    logger.warning(f"跳过非字典类型的视频数据: {type(video_data)}")
                     continue
 
                 video_path = video_data.get('video_path', '')
                 shot_id = video_data.get('shot_id', '')
+
+                logger.info(f"处理视频 {i+1}/{len(videos_list)}: {shot_id} -> {video_path}")
 
                 # 检查视频文件是否存在
                 if not video_path or not os.path.exists(video_path):
@@ -579,13 +621,24 @@ class VideoCompositionTab(QWidget):
                     continue
 
                 # 从shot_id中提取序号来匹配音频文件和排序
-                # shot_id格式通常是 text_segment_XXX
+                # shot_id格式可能是 shot_X 或 text_segment_XXX
                 segment_number = None
-                if 'text_segment_' in shot_id:
+
+                # 尝试从 shot_X 格式提取
+                if shot_id.startswith('shot_'):
                     try:
                         segment_number = int(shot_id.split('_')[-1])
                     except ValueError:
                         pass
+
+                # 尝试从 text_segment_XXX 格式提取
+                elif 'text_segment_' in shot_id:
+                    try:
+                        segment_number = int(shot_id.split('_')[-1])
+                    except ValueError:
+                        pass
+
+                logger.debug(f"处理视频: {shot_id}, 提取的序号: {segment_number}")
 
                 # 查找对应的音频文件
                 audio_path = ""
@@ -596,6 +649,8 @@ class VideoCompositionTab(QWidget):
                         f"segment_{segment_number:03d}_{shot_id}.mp3",  # 备用格式1
                         f"{shot_id}.mp3",  # 简单格式
                         f"text_segment_{segment_number:03d}.mp3",  # 简化格式
+                        f"shot_{segment_number}.mp3",  # shot格式
+                        f"shot_{segment_number:03d}.mp3",  # shot格式（补零）
                     ]
 
                     # 在edge_tts子目录中查找

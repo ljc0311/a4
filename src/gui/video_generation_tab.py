@@ -36,11 +36,35 @@ class VideoGenerationWorker(QThread):
         self.project_manager = project_manager
         self.project_name = project_name
         self.is_cancelled = False
-    
+        self._current_loop = None  # 保存当前事件循环引用
+
+    def cancel(self):
+        """取消任务"""
+        self.is_cancelled = True
+        logger.info("视频生成任务已标记为取消")
+
+        # 如果有正在运行的事件循环，尝试取消其中的任务
+        if self._current_loop and not self._current_loop.is_closed():
+            try:
+                # 获取循环中的所有任务并取消
+                pending_tasks = [task for task in asyncio.all_tasks(self._current_loop)
+                               if not task.done()]
+                for task in pending_tasks:
+                    task.cancel()
+                logger.info(f"已取消 {len(pending_tasks)} 个异步任务")
+            except Exception as e:
+                logger.warning(f"取消异步任务时出错: {e}")
+
     def run(self):
         """运行视频生成（修复Event loop问题）"""
         loop = None
         try:
+            # 检查是否已被取消
+            if self.is_cancelled:
+                logger.info("任务在启动前已被取消")
+                self.video_generated.emit("", False, "任务已取消")
+                return
+
             # 确保在新线程中创建新的事件循环
             try:
                 # 检查是否已有事件循环
@@ -54,6 +78,7 @@ class VideoGenerationWorker(QThread):
             # 创建新的事件循环
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+            self._current_loop = loop  # 保存循环引用
 
             # 运行异步生成
             result = loop.run_until_complete(self._generate_video_async())
@@ -129,6 +154,11 @@ class VideoGenerationWorker(QThread):
                 self.error_message = error_message
 
         try:
+            # 检查是否已被取消
+            if self.is_cancelled:
+                logger.info("异步任务在开始前已被取消")
+                return Result(False, "", "任务已取消")
+
             from src.processors.video_processor import VideoProcessor
             from src.core.service_manager import ServiceManager
 
@@ -153,12 +183,27 @@ class VideoGenerationWorker(QThread):
             # 优化提示词以适合视频生成
             shot_id = self.scene_data.get('shot_id', '')
             duration = self.generation_config.get('duration', 5.0)
-            optimized_prompt = self._optimize_prompt_for_cogvideox(original_prompt, shot_id, duration)
+
+            # 调用视频提示词优化
+            try:
+                from src.processors.cogvideox_prompt_optimizer import CogVideoXPromptOptimizer
+                optimizer = CogVideoXPromptOptimizer()
+                shot_info = {'shot_type': 'medium_shot', 'camera_angle': 'eye_level', 'movement': 'static'}
+                optimized_prompt = optimizer.optimize_for_video(original_prompt, shot_info, duration)
+                logger.info(f"视频提示词优化成功: {original_prompt[:50]}... -> {optimized_prompt[:50]}...")
+            except Exception as e:
+                logger.warning(f"视频提示词优化失败，使用原始提示词: {e}")
+                optimized_prompt = original_prompt
 
             logger.info(f"视频生成提示词: {optimized_prompt}")
 
             if not image_path or not os.path.exists(image_path):
                 raise Exception(f"图像文件不存在: {image_path}")
+
+            # 再次检查是否已被取消
+            if self.is_cancelled:
+                logger.info("任务在视频生成前已被取消")
+                return Result(False, "", "任务已取消")
 
             self.progress_updated.emit(30, "开始生成视频...")
 
@@ -2468,7 +2513,10 @@ class VideoGenerationTab(QWidget):
     def update_scene_status(self, scene_data, status):
         """更新场景状态"""
         try:
+            logger.info(f"尝试更新场景状态: {scene_data.get('shot_id', 'unknown')} -> {status}")
+
             # 在场景列表中找到对应场景并更新状态
+            scene_found = False
             for i, scene in enumerate(self.current_scenes):
                 # 使用多种方式匹配场景
                 scene_match = False
@@ -2489,9 +2537,14 @@ class VideoGenerationTab(QWidget):
 
                 if scene_match:
                     scene['status'] = status
+                    scene_found = True
+                    logger.info(f"成功更新场景状态: {scene.get('shot_id', 'unknown')} -> {status}")
                     # 刷新表格显示
                     self.update_scene_table()
                     break
+
+            if not scene_found:
+                logger.warning(f"未找到匹配的场景，无法更新状态: {scene_data.get('shot_id', 'unknown')}")
 
         except Exception as e:
             logger.error(f"更新场景状态失败: {e}")
@@ -2631,7 +2684,10 @@ class VideoGenerationTab(QWidget):
             else:
                 # 更新失败状态
                 if hasattr(self, '_current_generating_scene'):
+                    logger.info(f"更新场景状态为失败: {self._current_generating_scene.get('shot_id', 'unknown')}")
                     self.update_scene_status(self._current_generating_scene, '失败')
+                else:
+                    logger.warning("没有找到当前生成的场景，无法更新失败状态")
 
                 self.status_label.setText(f"视频生成失败: {error_message}")
                 QMessageBox.critical(self, "生成失败", f"视频生成失败:\n{error_message}")

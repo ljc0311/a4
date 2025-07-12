@@ -28,7 +28,8 @@ class EngineFactory:
             EngineType.OPENAI_DALLE: ('dalle_engine', 'DalleEngine'),
             EngineType.GOOGLE_IMAGEN: ('imagen_engine', 'ImagenEngine'),
             EngineType.STABILITY_AI: ('stability_engine', 'StabilityEngine'),
-            EngineType.COGVIEW_3_FLASH: ('cogview_3_flash_engine', 'CogView3FlashEngine')
+            EngineType.COGVIEW_3_FLASH: ('cogview_3_flash_engine', 'CogView3FlashEngine'),
+            EngineType.VHEER: ('vheer_engine', 'VheerEngine')
         }
         
         for engine_type, (module_name, class_name) in engine_mappings.items():

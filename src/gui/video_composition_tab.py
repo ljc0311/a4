@@ -520,17 +520,11 @@ class VideoCompositionTab(QWidget):
                 logger.warning("项目管理器未初始化")
                 return
 
-            # 🔧 修复：如果没有当前项目，尝试重新获取
+            # 🔧 修复：如果没有当前项目，显示提示
             if not self.project_manager.current_project:
-                logger.info("没有当前项目，尝试重新获取项目列表")
-                # 刷新项目列表
-                self.project_manager.refresh_project_list()
-
-                # 如果仍然没有项目，显示提示
-                if not self.project_manager.current_project:
-                    logger.warning("没有当前项目，无法加载视频合成数据")
-                    self.show_no_project_message()
-                    return
+                logger.warning("没有当前项目，无法加载视频合成数据")
+                self.show_no_project_message()
+                return
 
             project_data = self.project_manager.current_project
             project_dir = project_data.get('project_dir', '')

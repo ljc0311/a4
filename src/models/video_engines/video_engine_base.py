@@ -15,6 +15,8 @@ from src.utils.logger import logger
 class VideoEngineType(Enum):
     """视频引擎类型枚举"""
     COGVIDEOX_FLASH = "cogvideox_flash"
+    DOUBAO_SEEDANCE_PRO = "doubao_seedance_pro"
+    DOUBAO_SEEDANCE_LITE = "doubao_seedance_lite"
     REPLICATE_SVD = "replicate_svd"
     PIXVERSE = "pixverse"
     HAIPER = "haiper"

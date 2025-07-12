@@ -684,28 +684,18 @@ class VideoComposer:
                 if audio_duration <= 0:
                     audio_duration = 5.0  # 默认5秒
 
-                logger.info(f"片段 {i+1}: 音频时长 {audio_duration:.2f}秒")
+                # 获取视频实际时长
+                video_duration = self.get_video_duration(video_path)
+                if video_duration <= 0:
+                    video_duration = 5.0  # 默认5秒
 
-                # 创建同步的视频片段（调整视频时长匹配音频）
+                logger.info(f"片段 {i+1}: 音频时长 {audio_duration:.2f}秒, 视频时长 {video_duration:.2f}秒")
+
+                # 创建同步的视频片段（调整视频时长严格匹配音频）
                 synced_video = os.path.join(self.temp_dir, f"synced_{i:03d}.mp4")
 
-                # 使用FFmpeg创建同步的视频音频片段，支持视频循环播放
-                # 如果音频时长超过视频时长，让视频循环播放
-                cmd = [
-                    self.ffmpeg_path,
-                    "-stream_loop", "-1",  # 无限循环视频
-                    "-i", video_path,
-                    "-i", audio_path,
-                    "-t", str(audio_duration),  # 设置时长为音频时长
-                    "-c:v", "libx264",
-                    "-c:a", "aac",
-                    "-filter:a", "volume=3.0",  # 增加音频音量3倍
-                    "-map", "0:v:0",  # 使用视频流（循环）
-                    "-map", "1:a:0",  # 使用音频流
-                    "-shortest",  # 以最短流为准（音频）
-                    "-y",
-                    synced_video
-                ]
+                # 根据时长关系选择不同的处理策略
+                cmd = self._create_sync_command(video_path, audio_path, audio_duration, video_duration, synced_video)
 
                 logger.info(f"执行同步命令: {' '.join(cmd)}")
                 result = subprocess.run(cmd, capture_output=True, timeout=60)
@@ -813,6 +803,96 @@ class VideoComposer:
         except Exception as e:
             logger.warning(f"清理临时文件失败: {e}")
     
+    def get_video_duration(self, video_path: str) -> float:
+        """获取视频时长"""
+        try:
+            if not os.path.exists(video_path):
+                return 0.0
+
+            # 使用FFprobe获取视频时长
+            cmd = [
+                self.ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe'),
+                "-v", "quiet",
+                "-show_entries", "format=duration",
+                "-of", "csv=p=0",
+                video_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            if result.returncode == 0:
+                duration_str = self._decode_output(result.stdout).strip()
+                if duration_str:
+                    duration = float(duration_str)
+                    logger.debug(f"视频时长: {duration:.2f}秒 - {video_path}")
+                    return duration
+
+            logger.warning(f"无法获取视频时长: {video_path}")
+            return 0.0
+
+        except Exception as e:
+            logger.error(f"获取视频时长失败: {e}")
+            return 0.0
+
+    def _create_sync_command(self, video_path: str, audio_path: str,
+                           audio_duration: float, video_duration: float, output_path: str) -> List[str]:
+        """根据音视频时长关系创建同步命令"""
+
+        # 时长差异阈值（秒）
+        tolerance = 0.1
+
+        if abs(video_duration - audio_duration) <= tolerance:
+            # 时长基本相等，直接合并
+            logger.info("视频和音频时长基本相等，直接合并")
+            cmd = [
+                self.ffmpeg_path,
+                "-i", video_path,
+                "-i", audio_path,
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-filter:a", "volume=3.0",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-y",
+                output_path
+            ]
+
+        elif video_duration < audio_duration:
+            # 视频时长小于音频时长，循环视频
+            logger.info(f"视频时长({video_duration:.2f}s) < 音频时长({audio_duration:.2f}s)，循环播放视频")
+            cmd = [
+                self.ffmpeg_path,
+                "-stream_loop", "-1",  # 无限循环视频
+                "-i", video_path,
+                "-i", audio_path,
+                "-t", str(audio_duration),  # 严格按音频时长截取
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-filter:a", "volume=3.0",
+                "-map", "0:v:0",  # 使用循环的视频流
+                "-map", "1:a:0",  # 使用完整的音频流
+                "-y",
+                output_path
+            ]
+
+        else:
+            # 视频时长大于音频时长，截断视频
+            logger.info(f"视频时长({video_duration:.2f}s) > 音频时长({audio_duration:.2f}s)，截断视频")
+            cmd = [
+                self.ffmpeg_path,
+                "-i", video_path,
+                "-i", audio_path,
+                "-t", str(audio_duration),  # 严格按音频时长截取
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                "-filter:a", "volume=3.0",
+                "-map", "0:v:0",  # 使用截断的视频流
+                "-map", "1:a:0",  # 使用完整的音频流
+                "-y",
+                output_path
+            ]
+
+        return cmd
+
     def __del__(self):
         """析构函数"""
         self.cleanup()

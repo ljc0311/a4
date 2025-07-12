@@ -36,6 +36,11 @@ try:
 except ImportError:
     CogView3FlashEngine = None
 
+try:
+    from .vheer_engine import VheerEngine
+except ImportError:
+    VheerEngine = None
+
 __all__ = [
     'PollinationsEngine',
     'ComfyUILocalEngine',

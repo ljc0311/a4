@@ -48,7 +48,11 @@ class VideoGenerationSettingsWidget(QWidget):
         # CogVideoX-Flash 设置标签页
         self.cogvideox_tab = self.create_cogvideox_tab()
         self.engine_tabs.addTab(self.cogvideox_tab, "🌟 CogVideoX-Flash (免费)")
-        
+
+        # 豆包视频生成设置标签页
+        self.doubao_tab = self.create_doubao_tab()
+        self.engine_tabs.addTab(self.doubao_tab, "🎭 豆包视频生成")
+
         # 其他引擎设置标签页（预留）
         self.other_engines_tab = self.create_other_engines_tab()
         self.engine_tabs.addTab(self.other_engines_tab, "☁️ 其他引擎")
@@ -183,7 +187,125 @@ class VideoGenerationSettingsWidget(QWidget):
         
         layout.addStretch()
         return tab
-    
+
+    def create_doubao_tab(self):
+        """创建豆包视频生成设置标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # API配置组
+        api_group = QGroupBox("API配置")
+        api_form = QFormLayout()
+
+        # API密钥
+        self.doubao_api_key = QLineEdit()
+        self.doubao_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.doubao_api_key.setPlaceholderText("输入豆包API密钥")
+        self.doubao_api_key.setToolTip("从火山引擎控制台获取API密钥")
+        api_form.addRow("API密钥:", self.doubao_api_key)
+
+        # API端点
+        self.doubao_base_url = QLineEdit()
+        self.doubao_base_url.setPlaceholderText("https://ark.cn-beijing.volces.com/api/v3")
+        self.doubao_base_url.setToolTip("豆包API端点地址")
+        api_form.addRow("API端点:", self.doubao_base_url)
+
+        # 启用状态
+        self.doubao_enabled = QCheckBox("启用豆包视频生成引擎")
+        self.doubao_enabled.setChecked(False)  # 默认禁用
+        api_form.addRow(self.doubao_enabled)
+
+        api_group.setLayout(api_form)
+        layout.addWidget(api_group)
+
+        # 生成参数组
+        params_group = QGroupBox("生成参数")
+        params_form = QFormLayout()
+
+        # 超时时间
+        self.doubao_timeout = QSpinBox()
+        self.doubao_timeout.setRange(60, 600)
+        self.doubao_timeout.setValue(600)
+        self.doubao_timeout.setSuffix(" 秒")
+        self.doubao_timeout.setToolTip("API请求超时时间")
+        params_form.addRow("超时时间:", self.doubao_timeout)
+
+        # 重试次数
+        self.doubao_max_retries = QSpinBox()
+        self.doubao_max_retries.setRange(1, 10)
+        self.doubao_max_retries.setValue(3)
+        self.doubao_max_retries.setToolTip("失败时的最大重试次数")
+        params_form.addRow("重试次数:", self.doubao_max_retries)
+
+        # 最大时长
+        self.doubao_max_duration = QDoubleSpinBox()
+        self.doubao_max_duration.setRange(5.0, 10.0)
+        self.doubao_max_duration.setValue(10.0)
+        self.doubao_max_duration.setSuffix(" 秒")
+        self.doubao_max_duration.setToolTip("视频最大时长（豆包支持5秒和10秒）")
+        params_form.addRow("最大时长:", self.doubao_max_duration)
+
+        # 并发任务数
+        self.doubao_max_concurrent = QSpinBox()
+        self.doubao_max_concurrent.setRange(1, 5)
+        self.doubao_max_concurrent.setValue(2)
+        self.doubao_max_concurrent.setToolTip("同时进行的视频生成任务数量")
+        params_form.addRow("并发任务数:", self.doubao_max_concurrent)
+
+        params_group.setLayout(params_form)
+        layout.addWidget(params_group)
+
+        # 默认设置组
+        defaults_group = QGroupBox("默认设置")
+        defaults_form = QFormLayout()
+
+        # 默认分辨率
+        self.doubao_default_resolution = QComboBox()
+        self.doubao_default_resolution.addItems([
+            "480p", "720p", "1080p"
+        ])
+        self.doubao_default_resolution.setCurrentText("720p")
+        defaults_form.addRow("默认分辨率:", self.doubao_default_resolution)
+
+        # 默认宽高比
+        self.doubao_default_ratio = QComboBox()
+        self.doubao_default_ratio.addItems([
+            "16:9 (横屏)", "9:16 (竖屏)", "1:1 (正方形)",
+            "4:3", "3:4", "21:9", "9:21", "keep_ratio (保持原比例)", "adaptive (自适应)"
+        ])
+        self.doubao_default_ratio.setCurrentText("16:9 (横屏)")
+        defaults_form.addRow("默认宽高比:", self.doubao_default_ratio)
+
+        # 帧率（自动）
+        doubao_fps_label = QLabel("30 fps (自动)")
+        doubao_fps_label.setToolTip("豆包引擎根据分辨率自动确定帧率")
+        defaults_form.addRow("帧率:", doubao_fps_label)
+
+        defaults_group.setLayout(defaults_form)
+        layout.addWidget(defaults_group)
+
+        # 说明文本
+        info_group = QGroupBox("引擎说明")
+        info_layout = QVBoxLayout()
+
+        info_text = QTextEdit()
+        info_text.setMaximumHeight(80)
+        info_text.setPlainText(
+            "豆包视频生成是火山引擎提供的AI视频生成服务。\n"
+            "• 支持图生视频，支持5秒和10秒时长\n"
+            "• 支持480p、720p、1080p分辨率\n"
+            "• 支持多种宽高比，包括横屏、竖屏、正方形等\n"
+            "• 付费服务，按生成时长计费"
+        )
+        info_text.setReadOnly(True)
+        info_layout.addWidget(info_text)
+
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+
+        layout.addStretch()
+        return tab
+
     def create_other_engines_tab(self):
         """创建其他引擎设置标签页"""
         tab = QWidget()
@@ -326,6 +448,17 @@ class VideoGenerationSettingsWidget(QWidget):
             self.cogvideox_max_retries.setValue(cogvideox_config.get('max_retries', 3))
             self.cogvideox_max_duration.setValue(cogvideox_config.get('max_duration', 10.0))
 
+            # 加载豆包设置
+            doubao_config = config.get('engines', {}).get('doubao_seedance_pro', {})
+
+            self.doubao_enabled.setChecked(doubao_config.get('enabled', False))
+            self.doubao_api_key.setText(doubao_config.get('api_key', ''))
+            self.doubao_base_url.setText(doubao_config.get('base_url', 'https://ark.cn-beijing.volces.com/api/v3'))
+            self.doubao_timeout.setValue(doubao_config.get('timeout', 600))
+            self.doubao_max_retries.setValue(doubao_config.get('max_retries', 3))
+            self.doubao_max_duration.setValue(doubao_config.get('max_duration', 4.0))
+            self.doubao_max_concurrent.setValue(doubao_config.get('max_concurrent', 2))
+
             # 加载全局设置
             self.routing_strategy.setCurrentText(f"{config.get('routing_strategy', 'free_first')} - 优先免费引擎")
             self.concurrent_limit.setValue(config.get('concurrent_limit', 2))
@@ -365,6 +498,21 @@ class VideoGenerationSettingsWidget(QWidget):
                         ],
                         'supported_fps': [24, 30, 60],
                         'cost_per_second': 0.0
+                    },
+                    'doubao_seedance_pro': {
+                        'enabled': self.doubao_enabled.isChecked(),
+                        'api_key': self.doubao_api_key.text().strip(),
+                        'base_url': self.doubao_base_url.text().strip() or 'https://ark.cn-beijing.volces.com/api/v3',
+                        'model': 'doubao-seedance-pro',
+                        'timeout': self.doubao_timeout.value(),
+                        'max_retries': self.doubao_max_retries.value(),
+                        'max_duration': self.doubao_max_duration.value(),
+                        'max_concurrent': self.doubao_max_concurrent.value(),
+                        'supported_resolutions': [
+                            '768x768', '1024x576', '576x1024'
+                        ],
+                        'supported_fps': [16],
+                        'cost_per_second': 0.02
                     }
                 }
             }
@@ -409,6 +557,8 @@ class VideoGenerationSettingsWidget(QWidget):
 
             if current_tab == 0:  # CogVideoX-Flash
                 self.test_cogvideox_connection()
+            elif current_tab == 1:  # 豆包视频生成
+                self.test_doubao_connection()
             else:
                 QMessageBox.information(self, "提示", "当前标签页暂不支持连接测试")
 
@@ -487,6 +637,79 @@ class VideoGenerationSettingsWidget(QWidget):
 
         except Exception as e:
             logger.error(f"CogVideoX连接测试失败: {e}")
+            QMessageBox.critical(self, "错误", f"连接测试失败: {str(e)}")
+
+    def test_doubao_connection(self):
+        """测试豆包连接"""
+        try:
+            api_key = self.doubao_api_key.text().strip()
+            if not api_key:
+                QMessageBox.warning(self, "警告", "请先输入豆包API密钥")
+                return
+
+            # 创建临时配置进行测试
+            test_config = {
+                'engines': {
+                    'doubao_seedance_pro': {
+                        'enabled': True,
+                        'api_key': api_key,
+                        'base_url': self.doubao_base_url.text().strip(),
+                        'timeout': self.doubao_timeout.value()
+                    }
+                }
+            }
+
+            # 显示测试进度
+            from PyQt5.QtWidgets import QProgressDialog
+            progress = QProgressDialog("正在测试豆包连接...", "取消", 0, 0, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.show()
+
+            # 异步测试连接
+            import asyncio
+            from src.models.video_engines.video_generation_service import VideoGenerationService
+
+            async def test_async():
+                service = VideoGenerationService(test_config)
+                try:
+                    result = await service.test_engine('doubao_seedance_pro')
+                    await service.shutdown()
+                    return result
+                except Exception as e:
+                    await service.shutdown()
+                    raise e
+
+            # 在新线程中运行异步测试
+            import threading
+            result = [False]
+            error = [None]
+
+            def run_test():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    result[0] = loop.run_until_complete(test_async())
+                except Exception as e:
+                    error[0] = e
+                finally:
+                    loop.close()
+
+            thread = threading.Thread(target=run_test)
+            thread.start()
+            thread.join(timeout=30)  # 30秒超时
+
+            progress.close()
+
+            if error[0]:
+                raise error[0]
+
+            if result[0]:
+                QMessageBox.information(self, "成功", "豆包视频生成连接测试成功！")
+            else:
+                QMessageBox.warning(self, "失败", "豆包连接测试失败，请检查API密钥和网络连接")
+
+        except Exception as e:
+            logger.error(f"豆包连接测试失败: {e}")
             QMessageBox.critical(self, "错误", f"连接测试失败: {str(e)}")
 
     def reset_settings(self):

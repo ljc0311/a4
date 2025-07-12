@@ -350,6 +350,27 @@ class VideoGenerationTab(QWidget):
         except Exception as e:
             logger.error(f"处理并发数变化时出错: {e}")
 
+    def on_engine_changed(self):
+        """引擎选择改变时的处理"""
+        try:
+            selected_engine = self.engine_combo.currentData()
+            logger.info(f"用户选择视频生成引擎: {selected_engine}")
+
+            # 根据选择的引擎显示/隐藏相应的设置组
+            if selected_engine == "cogvideox_flash":
+                self.cogvideox_group.setVisible(True)
+                self.doubao_group.setVisible(False)
+            elif selected_engine == "doubao_seedance_pro":
+                self.cogvideox_group.setVisible(False)
+                self.doubao_group.setVisible(True)
+            else:
+                # 默认显示CogVideoX设置
+                self.cogvideox_group.setVisible(True)
+                self.doubao_group.setVisible(False)
+
+        except Exception as e:
+            logger.error(f"处理引擎选择改变时出错: {e}")
+
     def _optimize_prompt_for_cogvideox(self, original_prompt: str, shot_id: str = "", duration: float = 5.0) -> str:
         """使用CogVideoX优化器优化视频提示词"""
         try:
@@ -566,8 +587,23 @@ class VideoGenerationTab(QWidget):
         title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         layout.addWidget(title_label)
 
+        # 引擎选择组
+        engine_group = QGroupBox("视频生成引擎")
+        engine_form = QFormLayout()
+
+        # 引擎选择下拉框
+        self.engine_combo = QComboBox()
+        self.engine_combo.addItem("🌟 CogVideoX-Flash (免费)", "cogvideox_flash")
+        self.engine_combo.addItem("🎭 豆包视频生成", "doubao_seedance_pro")
+        self.engine_combo.setCurrentIndex(0)  # 默认选择CogVideoX-Flash
+        self.engine_combo.currentTextChanged.connect(self.on_engine_changed)
+        engine_form.addRow("选择引擎:", self.engine_combo)
+
+        engine_group.setLayout(engine_form)
+        layout.addWidget(engine_group)
+
         # CogVideoX-Flash 设置组
-        cogvideox_group = QGroupBox("CogVideoX-Flash 设置")
+        self.cogvideox_group = QGroupBox("CogVideoX-Flash 设置")
         cogvideox_form = QFormLayout()
 
         # 视频时长 - CogVideoX-Flash支持的时长
@@ -610,8 +646,54 @@ class VideoGenerationTab(QWidget):
         motion_layout.addWidget(self.motion_label)
         cogvideox_form.addRow("运动强度:", motion_layout)
 
-        cogvideox_group.setLayout(cogvideox_form)
-        layout.addWidget(cogvideox_group)
+        self.cogvideox_group.setLayout(cogvideox_form)
+        layout.addWidget(self.cogvideox_group)
+
+        # 豆包视频生成设置组
+        self.doubao_group = QGroupBox("豆包视频生成设置")
+        doubao_form = QFormLayout()
+
+        # 视频时长 - 豆包支持的时长
+        self.doubao_duration_combo = QComboBox()
+        self.doubao_duration_combo.addItems(["5", "10"])  # 豆包支持5秒和10秒
+        self.doubao_duration_combo.setCurrentText("5")
+        self.doubao_duration_combo.setToolTip("视频时长（豆包支持5秒和10秒）")
+        doubao_form.addRow("视频时长:", self.doubao_duration_combo)
+
+        # 分辨率选择 - 豆包支持的分辨率
+        self.doubao_resolution_combo = QComboBox()
+        self.doubao_resolution_combo.addItems([
+            "480p", "720p", "1080p"
+        ])
+        self.doubao_resolution_combo.setCurrentText("720p")
+        doubao_form.addRow("分辨率:", self.doubao_resolution_combo)
+
+        # 宽高比选择
+        self.doubao_ratio_combo = QComboBox()
+        self.doubao_ratio_combo.addItems([
+            "16:9 (横屏)", "9:16 (竖屏)", "1:1 (正方形)",
+            "4:3", "3:4", "21:9", "9:21", "keep_ratio (保持原比例)", "adaptive (自适应)"
+        ])
+        self.doubao_ratio_combo.setCurrentText("16:9 (横屏)")
+        doubao_form.addRow("宽高比:", self.doubao_ratio_combo)
+
+        # 帧率 - 豆包自动确定
+        doubao_fps_label = QLabel("30 fps (自动)")
+        doubao_fps_label.setStyleSheet("color: #666; font-style: italic;")
+        doubao_form.addRow("帧率:", doubao_fps_label)
+
+        # 并发任务数 - 豆包建议较低并发
+        self.doubao_concurrent_tasks_combo = QComboBox()
+        self.doubao_concurrent_tasks_combo.addItems(["1", "2"])
+        self.doubao_concurrent_tasks_combo.setCurrentText("2")
+        self.doubao_concurrent_tasks_combo.setToolTip("同时进行的视频生成任务数量（豆包建议较低并发）")
+        doubao_form.addRow("并发任务数:", self.doubao_concurrent_tasks_combo)
+
+        self.doubao_group.setLayout(doubao_form)
+        layout.addWidget(self.doubao_group)
+
+        # 默认隐藏豆包设置组
+        self.doubao_group.setVisible(False)
 
         # 输出设置组
         output_group = QGroupBox("输出设置")
@@ -2133,26 +2215,60 @@ class VideoGenerationTab(QWidget):
                 # 只有在没有提供图像路径时才显示警告
                 logger.debug("没有提供图像路径，使用默认分辨率 1024x1024")
 
-            # 确定视频时长
-            if target_duration is not None:
-                # 使用指定的目标时长，自动调整到支持的时长
-                original_duration = target_duration
-                duration = self._validate_duration(target_duration)
-                if duration != original_duration:
-                    logger.info(f"目标时长已自动调整: {original_duration}s -> {duration}s")
-            else:
-                # 使用UI设置的时长
-                duration = int(self.duration_combo.currentText())
+            # 获取选择的引擎
+            selected_engine = self.engine_combo.currentData() if hasattr(self, 'engine_combo') else 'cogvideox_flash'
 
-            config = {
-                'engine': 'cogvideox_flash',
-                'duration': duration,
-                'fps': int(self.fps_combo.currentText()),
-                'width': width,
-                'height': height,
-                'motion_intensity': self.motion_slider.value() / 100.0,
-                'max_concurrent_tasks': int(self.concurrent_tasks_combo.currentText())
-            }
+            # 根据引擎类型确定参数
+            if selected_engine == 'doubao_seedance_pro':
+                # 豆包引擎配置
+                if target_duration is not None:
+                    # 豆包支持5秒和10秒，选择最接近的
+                    duration = 5 if target_duration <= 7.5 else 10
+                    if duration != target_duration:
+                        logger.info(f"豆包引擎时长已调整: {target_duration}s -> {duration}s")
+                else:
+                    # 使用豆包UI设置的时长
+                    duration = int(self.doubao_duration_combo.currentText())
+
+                # 解析豆包分辨率和宽高比
+                resolution_text = self.doubao_resolution_combo.currentText()
+                ratio_text = self.doubao_ratio_combo.currentText()
+
+                # 根据分辨率和宽高比确定实际像素尺寸
+                width, height = self._calculate_doubao_dimensions(resolution_text, ratio_text)
+
+                config = {
+                    'engine': 'doubao_seedance_pro',
+                    'duration': duration,
+                    'fps': 30,  # 豆包根据分辨率自动确定帧率
+                    'width': width,
+                    'height': height,
+                    'motion_intensity': 0.5,  # 豆包没有运动强度设置，使用默认值
+                    'max_concurrent_tasks': int(self.doubao_concurrent_tasks_combo.currentText()),
+                    'resolution': resolution_text,  # 传递给引擎的分辨率参数
+                    'ratio': ratio_text  # 传递给引擎的宽高比参数
+                }
+            else:
+                # CogVideoX-Flash 引擎配置（默认）
+                if target_duration is not None:
+                    # 使用指定的目标时长，自动调整到支持的时长
+                    original_duration = target_duration
+                    duration = self._validate_duration(target_duration)
+                    if duration != original_duration:
+                        logger.info(f"目标时长已自动调整: {original_duration}s -> {duration}s")
+                else:
+                    # 使用UI设置的时长
+                    duration = int(self.duration_combo.currentText())
+
+                config = {
+                    'engine': 'cogvideox_flash',
+                    'duration': duration,
+                    'fps': int(self.fps_combo.currentText()),
+                    'width': width,
+                    'height': height,
+                    'motion_intensity': self.motion_slider.value() / 100.0,
+                    'max_concurrent_tasks': int(self.concurrent_tasks_combo.currentText())
+                }
 
             # 添加音效提示
             if audio_hint:
@@ -2162,15 +2278,103 @@ class VideoGenerationTab(QWidget):
 
         except Exception as e:
             logger.error(f"获取生成配置失败: {e}")
-            return {
-                'engine': 'cogvideox_flash',
-                'duration': 5,
-                'fps': 30,
-                'width': 1024,
-                'height': 1024,
-                'motion_intensity': 0.5,
-                'max_concurrent_tasks': 3
+            # 返回默认配置，优先使用CogVideoX-Flash
+            selected_engine = 'cogvideox_flash'
+            try:
+                if hasattr(self, 'engine_combo'):
+                    selected_engine = self.engine_combo.currentData() or 'cogvideox_flash'
+            except:
+                pass
+
+            if selected_engine == 'doubao_seedance_pro':
+                return {
+                    'engine': 'doubao_seedance_pro',
+                    'duration': 4,
+                    'fps': 16,
+                    'width': 768,
+                    'height': 768,
+                    'motion_intensity': 0.5,
+                    'max_concurrent_tasks': 2
+                }
+            else:
+                return {
+                    'engine': 'cogvideox_flash',
+                    'duration': 5,
+                    'fps': 30,
+                    'width': 1024,
+                    'height': 1024,
+                    'motion_intensity': 0.5,
+                    'max_concurrent_tasks': 3
+                }
+
+    def _calculate_doubao_dimensions(self, resolution_text: str, ratio_text: str) -> tuple:
+        """根据豆包的分辨率和宽高比参数计算实际像素尺寸"""
+        try:
+            # 基础分辨率映射
+            base_sizes = {
+                '480p': 480,
+                '720p': 720,
+                '1080p': 1080
             }
+
+            # 获取基础尺寸
+            base_size = base_sizes.get(resolution_text, 720)
+
+            # 根据宽高比计算实际尺寸
+            if '16:9' in ratio_text:
+                if base_size == 480:
+                    return (854, 480)
+                elif base_size == 720:
+                    return (1280, 720)
+                else:  # 1080p
+                    return (1920, 1080)
+            elif '9:16' in ratio_text:
+                if base_size == 480:
+                    return (480, 854)
+                elif base_size == 720:
+                    return (720, 1280)
+                else:  # 1080p
+                    return (1080, 1920)
+            elif '1:1' in ratio_text:
+                return (base_size, base_size)
+            elif '4:3' in ratio_text:
+                if base_size == 480:
+                    return (640, 480)
+                elif base_size == 720:
+                    return (960, 720)
+                else:  # 1080p
+                    return (1440, 1080)
+            elif '3:4' in ratio_text:
+                if base_size == 480:
+                    return (480, 640)
+                elif base_size == 720:
+                    return (720, 960)
+                else:  # 1080p
+                    return (1080, 1440)
+            elif '21:9' in ratio_text:
+                if base_size == 480:
+                    return (1120, 480)
+                elif base_size == 720:
+                    return (1680, 720)
+                else:  # 1080p
+                    return (2520, 1080)
+            elif '9:21' in ratio_text:
+                if base_size == 480:
+                    return (480, 1120)
+                elif base_size == 720:
+                    return (720, 1680)
+                else:  # 1080p
+                    return (1080, 2520)
+            else:
+                # 默认16:9或自适应
+                if base_size == 720:
+                    return (1280, 720)
+                else:
+                    return (1920, 1080)
+
+        except Exception as e:
+            logger.warning(f"计算豆包尺寸失败，使用默认值: {e}")
+            return (1280, 720)  # 默认720p 16:9
 
     def _validate_duration(self, duration):
         """验证并调整视频时长到最接近的支持时长"""
@@ -2522,23 +2726,29 @@ class VideoGenerationTab(QWidget):
 
             # 在场景列表中找到对应场景并更新状态
             scene_found = False
+            target_shot_id = scene_data.get('shot_id', '')
+
             for i, scene in enumerate(self.current_scenes):
-                # 使用多种方式匹配场景
+                # 使用多种方式匹配场景，优先使用shot_id精确匹配
                 scene_match = False
+                current_shot_id = scene.get('shot_id', '')
 
-                # 方式1：通过scene_id和shot_id匹配
-                if (scene.get('scene_id') == scene_data.get('scene_id') and
-                    scene.get('shot_id') == scene_data.get('shot_id')):
+                # 方式1：通过shot_id精确匹配（最优先）
+                if target_shot_id and current_shot_id and target_shot_id == current_shot_id:
                     scene_match = True
+                    logger.debug(f"通过shot_id匹配场景: {target_shot_id}")
 
-                # 方式2：通过scene_index和shot_index匹配（兼容旧格式）
+                # 方式2：通过scene_id和shot_id匹配
+                elif (scene.get('scene_id') == scene_data.get('scene_id') and
+                      scene.get('shot_id') == scene_data.get('shot_id')):
+                    scene_match = True
+                    logger.debug(f"通过scene_id+shot_id匹配场景")
+
+                # 方式3：通过scene_index和shot_index匹配（兼容旧格式）
                 elif (scene.get('scene_index') == scene_data.get('scene_index') and
                       scene.get('shot_index') == scene_data.get('shot_index')):
                     scene_match = True
-
-                # 方式3：通过索引匹配
-                elif i < len(self.current_scenes) and scene == scene_data:
-                    scene_match = True
+                    logger.debug(f"通过索引匹配场景")
 
                 if scene_match:
                     scene['status'] = status
@@ -2549,7 +2759,7 @@ class VideoGenerationTab(QWidget):
                     break
 
             if not scene_found:
-                logger.warning(f"未找到匹配的场景，无法更新状态: {scene_data.get('shot_id', 'unknown')}")
+                logger.warning(f"未找到匹配的场景，无法更新状态: {target_shot_id}, 可用场景: {[s.get('shot_id', 'unknown') for s in self.current_scenes]}")
 
         except Exception as e:
             logger.error(f"更新场景状态失败: {e}")
@@ -2650,6 +2860,14 @@ class VideoGenerationTab(QWidget):
             completed_count = len([s for s in target_scenes if s.get('status') == '已生成'])
             failed_count = len([s for s in target_scenes if s.get('status') == '失败'])
             total_count = len(target_scenes)
+
+            # 调试信息：显示每个场景的状态
+            logger.info(f"场景状态统计:")
+            for scene in target_scenes:
+                shot_id = scene.get('shot_id', 'unknown')
+                status = scene.get('status', 'unknown')
+                logger.info(f"  - {shot_id}: {status}")
+            logger.info(f"统计结果: 成功={completed_count}, 失败={failed_count}, 总计={total_count}")
 
             self.status_label.setText(f"所有生成任务完成！成功: {completed_count}, 失败: {failed_count}, 总计: {total_count}")
 

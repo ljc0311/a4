@@ -293,8 +293,31 @@ class AIDrawingWidget(QWidget):
         cogview_info_label = QLabel("CogView-3 Flash: 自动使用智谱AI密钥")
         cogview_info_label.setStyleSheet("color: #666; font-style: italic;")
         api_layout.addRow("CogView-3 Flash:", cogview_info_label)
-        
+
+        # Vheer.com 配置说明
+        vheer_info_label = QLabel("Vheer.com: 免费在线AI图像生成服务 (无需API密钥)")
+        vheer_info_label.setStyleSheet("color: #2E8B57; font-weight: bold;")
+        api_layout.addRow("Vheer.com:", vheer_info_label)
+
         layout.addWidget(api_group)
+
+        # 引擎选择
+        engine_group = QGroupBox("选择生成引擎")
+        engine_layout = QFormLayout(engine_group)
+
+        self.api_engine_combo = QComboBox()
+        self.api_engine_combo.addItems([
+            "DALL-E (OpenAI)",
+            "Stability AI",
+            "Google Imagen",
+            "ComfyUI云端",
+            "CogView-3 Flash",
+            "Vheer.com (免费)"
+        ])
+        self.api_engine_combo.setCurrentText("Vheer.com (免费)")
+        engine_layout.addRow("当前引擎:", self.api_engine_combo)
+
+        layout.addWidget(engine_group)
         layout.addStretch()
 
         return tab
@@ -433,7 +456,113 @@ class AIDrawingWidget(QWidget):
 
     def _generate_with_api_engines(self, prompt):
         """使用API引擎生成图片"""
-        QMessageBox.information(self, "提示", "API引擎功能正在开发中，敬请期待！")
+        try:
+            # 获取选择的引擎
+            selected_engine = self.api_engine_combo.currentText()
+            logger.info(f"使用API引擎生成图片: {selected_engine}")
+
+            # 更新UI状态
+            self.generate_image_btn.setText("生成中...")
+            self.generate_image_btn.setEnabled(False)
+            self.generated_image_status_label.setText("🔄 正在生成图片...")
+
+            if "Vheer.com" in selected_engine:
+                self._generate_with_vheer(prompt)
+            elif "DALL-E" in selected_engine:
+                self._generate_with_dalle(prompt)
+            elif "Stability" in selected_engine:
+                self._generate_with_stability(prompt)
+            elif "Imagen" in selected_engine:
+                self._generate_with_imagen(prompt)
+            elif "CogView" in selected_engine:
+                self._generate_with_cogview(prompt)
+            elif "ComfyUI云端" in selected_engine:
+                self._generate_with_comfyui_cloud(prompt)
+            else:
+                QMessageBox.warning(self, "错误", f"不支持的引擎: {selected_engine}")
+                self._reset_ui_state()
+
+        except Exception as e:
+            logger.error(f"API引擎生成失败: {e}")
+            QMessageBox.critical(self, "错误", f"API引擎生成失败: {str(e)}")
+            self._reset_ui_state()
+
+    def _generate_with_vheer(self, prompt):
+        """使用Vheer.com生成图片"""
+        try:
+            logger.info("开始使用Vheer.com生成图片")
+
+            # 使用图像生成服务
+            if not self.image_generation_service:
+                self._init_image_generation_service()
+
+            # 创建生成配置
+            from src.models.image_engine_base import GenerationConfig
+            config = GenerationConfig(
+                prompt=prompt,
+                width=1024,
+                height=1024,
+                batch_size=1,
+                workflow_id=f'vheer_gui_{int(time.time())}'
+            )
+
+            # 异步生成图像
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                result = loop.run_until_complete(
+                    self.image_generation_service.generate_image(
+                        prompt=prompt,
+                        config=config.__dict__,
+                        engine_preference='vheer'
+                    )
+                )
+
+                if result.success and result.image_paths:
+                    self.add_images_to_gallery(result.image_paths)
+                    self.generated_image_status_label.setText(f"✅ Vheer成功生成 {len(result.image_paths)} 张图片")
+                    logger.info(f"Vheer生成成功: {result.image_paths}")
+                else:
+                    error_msg = result.error_message or "未知错误"
+                    self.generated_image_status_label.setText(f"❌ Vheer生成失败: {error_msg}")
+                    QMessageBox.warning(self, "生成失败", f"Vheer生成失败: {error_msg}")
+
+            finally:
+                loop.close()
+                self._reset_ui_state()
+
+        except Exception as e:
+            logger.error(f"Vheer生成过程中发生错误: {e}")
+            self.generated_image_status_label.setText(f"❌ Vheer生成失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"Vheer生成失败: {str(e)}")
+            self._reset_ui_state()
+
+    def _generate_with_dalle(self, prompt):
+        """使用DALL-E生成图片"""
+        QMessageBox.information(self, "提示", "DALL-E功能正在开发中，敬请期待！")
+        self._reset_ui_state()
+
+    def _generate_with_stability(self, prompt):
+        """使用Stability AI生成图片"""
+        QMessageBox.information(self, "提示", "Stability AI功能正在开发中，敬请期待！")
+        self._reset_ui_state()
+
+    def _generate_with_imagen(self, prompt):
+        """使用Google Imagen生成图片"""
+        QMessageBox.information(self, "提示", "Google Imagen功能正在开发中，敬请期待！")
+        self._reset_ui_state()
+
+    def _generate_with_cogview(self, prompt):
+        """使用CogView-3 Flash生成图片"""
+        QMessageBox.information(self, "提示", "CogView-3 Flash功能正在开发中，敬请期待！")
+        self._reset_ui_state()
+
+    def _generate_with_comfyui_cloud(self, prompt):
+        """使用ComfyUI云端生成图片"""
+        QMessageBox.information(self, "提示", "ComfyUI云端功能正在开发中，敬请期待！")
+        self._reset_ui_state()
 
     def connect_to_comfyui(self):
         """连接到ComfyUI"""

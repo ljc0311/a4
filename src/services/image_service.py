@@ -85,6 +85,8 @@ class ImageService(ServiceBase):
                 response = await self._call_stability_api(api_config, prompt, negative_prompt, **kwargs)
             elif api_config.provider.lower() == 'cogview_3_flash':
                 response = await self._call_cogview_api(api_config, prompt, **kwargs)
+            elif api_config.provider.lower() == 'vheer':
+                response = await self._call_vheer_api(api_config, prompt, **kwargs)
             else:
                 return ServiceResult(success=False, error=f"不支持的提供商: {api_config.provider}")
             
@@ -338,6 +340,52 @@ class ImageService(ServiceBase):
                 else:
                     error_text = await response.text()
                     raise Exception(f"CogView-3 Flash请求失败 (状态码: {response.status}): {error_text}")
+
+    async def _call_vheer_api(self, api_config: APIConfig, prompt: str, **kwargs) -> Dict:
+        """调用Vheer API"""
+        try:
+            # 使用图像生成引擎管理器
+            from src.models.image_generation_service import ImageGenerationService
+            from src.models.image_engine_base import GenerationConfig
+
+            # 创建生成配置
+            config = GenerationConfig(
+                prompt=prompt,
+                width=kwargs.get('width', 1024),
+                height=kwargs.get('height', 1024),
+                batch_size=1,
+                workflow_id=kwargs.get('workflow_id', 'vheer_api_call')
+            )
+
+            # 创建图像生成服务
+            image_service = ImageGenerationService()
+            await image_service.initialize()
+
+            # 生成图像
+            result = await image_service.generate_image(
+                prompt=prompt,
+                config=config.__dict__,
+                engine_preference='vheer'
+            )
+
+            if result.success and result.image_paths:
+                # 读取生成的图像文件并转换为base64
+                import base64
+                with open(result.image_paths[0], 'rb') as f:
+                    image_data = f.read()
+                    b64_data = base64.b64encode(image_data).decode('utf-8')
+
+                return {
+                    'image_data': b64_data,
+                    'format': 'base64',
+                    'image_path': result.image_paths[0]
+                }
+            else:
+                raise Exception(f"Vheer图像生成失败: {result.error_message}")
+
+        except Exception as e:
+            logger.error(f"Vheer API调用失败: {e}")
+            raise Exception(f"Vheer API调用失败: {e}")
 
     async def generate_image(self, prompt: str, style: str = "写实摄影风格",
                            negative_prompt: str = "", provider: str = None, **kwargs) -> ServiceResult:

@@ -23,6 +23,8 @@ class VideoEngineFactory:
         # 注册引擎类映射
         engine_mappings = {
             VideoEngineType.COGVIDEOX_FLASH: ('cogvideox_engine', 'CogVideoXEngine'),
+            VideoEngineType.DOUBAO_SEEDANCE_PRO: ('doubao_engine', 'DoubaoEngine'),
+            VideoEngineType.DOUBAO_SEEDANCE_LITE: ('doubao_lite_engine', 'DoubaoLiteEngine'),
             VideoEngineType.REPLICATE_SVD: ('replicate_engine', 'ReplicateVideoEngine'),
             VideoEngineType.PIXVERSE: ('pixverse_engine', 'PixVerseEngine'),
         }
@@ -32,7 +34,7 @@ class VideoEngineFactory:
                 module = importlib.import_module(f'.engines.{module_name}', package=__package__)
                 engine_class = getattr(module, class_name)
                 self._engine_classes[engine_type] = engine_class
-                logger.debug(f"已注册视频引擎类: {engine_type.value}")
+                logger.info(f"已注册视频引擎类: {engine_type.value}")
             except (ImportError, AttributeError) as e:
                 logger.warning(f"无法加载视频引擎 {engine_type.value}: {e}")
     

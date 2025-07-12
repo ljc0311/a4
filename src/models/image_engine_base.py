@@ -22,6 +22,7 @@ class EngineType(Enum):
     MIDJOURNEY = "midjourney"
     STABILITY_AI = "stability_ai"
     COGVIEW_3_FLASH = "cogview_3_flash"
+    VHEER = "vheer"
 
 
 class EngineStatus(Enum):

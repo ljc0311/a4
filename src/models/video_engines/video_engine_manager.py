@@ -87,11 +87,12 @@ class VideoEngineManager:
         # 引擎优先级（数字越小优先级越高）
         self.engine_priorities = {
             VideoEngineType.COGVIDEOX_FLASH: 1,  # 免费，优先级最高
-            VideoEngineType.PIXVERSE: 2,
-            VideoEngineType.REPLICATE_SVD: 3,
-            VideoEngineType.HAIPER: 4,
-            VideoEngineType.RUNWAY_ML: 5,
-            VideoEngineType.PIKA_LABS: 6
+            VideoEngineType.DOUBAO_SEEDANCE_PRO: 2,  # 豆包，高质量付费引擎
+            VideoEngineType.PIXVERSE: 3,
+            VideoEngineType.REPLICATE_SVD: 4,
+            VideoEngineType.HAIPER: 5,
+            VideoEngineType.RUNWAY_ML: 6,
+            VideoEngineType.PIKA_LABS: 7
         }
         
         VideoEngineManager._initialized = True
@@ -141,25 +142,42 @@ class VideoEngineManager:
     async def _select_best_engine(self, config: VideoGenerationConfig, 
                                  preferred_engines: Optional[List[VideoEngineType]] = None) -> Optional[VideoGenerationEngine]:
         """选择最佳引擎"""
-        # 获取可用引擎
+        # 如果指定了偏好引擎，直接尝试使用，不检查available_engines
+        if preferred_engines:
+            for engine_type in preferred_engines:
+                logger.info(f"尝试使用用户指定的引擎: {engine_type.value}")
+
+                # 直接创建用户指定的引擎
+                engine = await self.factory.create_engine(
+                    engine_type,
+                    self.config.get('engines', {}).get(engine_type.value, {})
+                )
+
+                if engine:
+                    if engine.status == VideoEngineStatus.IDLE:
+                        logger.info(f"用户指定的引擎 {engine_type.value} 初始化成功")
+                        return engine
+                    elif engine.status == VideoEngineStatus.ERROR:
+                        logger.warning(f"用户指定的引擎 {engine_type.value} 初始化失败: {engine.last_error}")
+                        # 对于用户明确选择的引擎，我们仍然尝试使用它
+                        # 让具体的生成过程来处理错误
+                        logger.info(f"仍然尝试使用用户指定的引擎 {engine_type.value}")
+                        return engine
+                    else:
+                        logger.info(f"用户指定的引擎 {engine_type.value} 状态: {engine.status}")
+                        return engine
+                else:
+                    logger.error(f"无法创建用户指定的引擎: {engine_type.value}")
+
+            # 如果用户指定的引擎都无法使用，返回None而不是回退
+            logger.error(f"用户指定的引擎都无法使用")
+            return None
+
+        # 只有在没有指定偏好引擎时，才获取available_engines
         available_engines = await self._get_available_engines()
         if not available_engines:
             logger.error("没有可用的视频生成引擎")
             return None
-        
-        # 如果指定了偏好引擎，优先使用
-        if preferred_engines:
-            for engine_type in preferred_engines:
-                if engine_type in available_engines:
-                    engine = await self.factory.create_engine(
-                        engine_type,
-                        self.config.get('engines', {}).get(engine_type.value, {})
-                    )
-                    # 🔧 修复：使用统一的引擎可用性检查
-                    if engine and self._is_engine_available(engine):
-                        if engine.status == VideoEngineStatus.ERROR:
-                            logger.info(f"尝试使用ERROR状态的引擎 {engine_type.value}（可能是临时问题）")
-                        return engine
         
         # 根据路由策略选择引擎
         if self.routing_strategy == VideoRoutingStrategy.PRIORITY:

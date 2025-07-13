@@ -57,6 +57,10 @@ class VideoGenerationSettingsWidget(QWidget):
         self.doubao_lite_tab = self.create_doubao_lite_tab()
         self.engine_tabs.addTab(self.doubao_lite_tab, "💰 豆包视频生成 Lite版")
 
+        # Vheer.com 免费图生视频设置标签页
+        self.vheer_tab = self.create_vheer_tab()
+        self.engine_tabs.addTab(self.vheer_tab, "🆓 Vheer.com (免费)")
+
         # 其他引擎设置标签页（预留）
         self.other_engines_tab = self.create_other_engines_tab()
         self.engine_tabs.addTab(self.other_engines_tab, "☁️ 其他引擎")
@@ -401,6 +405,119 @@ class VideoGenerationSettingsWidget(QWidget):
         usage_layout.addWidget(usage_text)
 
         usage_group.setLayout(usage_layout)
+        layout.addWidget(usage_group)
+
+        layout.addStretch()
+        return tab
+
+    def create_vheer_tab(self):
+        """创建Vheer.com免费图生视频设置标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # 基本信息组
+        info_group = QGroupBox("🆓 Vheer.com 免费图生视频服务")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel(
+            "Vheer.com 是一个免费的图生视频在线服务：\n"
+            "• 🆓 完全免费，无需API密钥\n"
+            "• 🎬 支持图像转视频生成\n"
+            "• ⚡ 支持多种分辨率和时长\n"
+            "• 🌐 基于网页自动化技术\n"
+            "• ⚠️ 生成速度较慢，请耐心等待"
+        )
+        info_text.setWordWrap(True)
+        info_text.setStyleSheet("color: #333; padding: 10px; background: #f0f8ff; border-radius: 5px;")
+        info_layout.addWidget(info_text)
+
+        layout.addWidget(info_group)
+
+        # 默认设置组
+        defaults_group = QGroupBox("默认设置")
+        defaults_form = QFormLayout(defaults_group)
+
+        # 默认视频时长
+        self.vheer_default_duration = QComboBox()
+        self.vheer_default_duration.addItem("3秒", 3)
+        self.vheer_default_duration.addItem("5秒", 5)
+        self.vheer_default_duration.addItem("8秒", 8)
+        self.vheer_default_duration.setCurrentIndex(1)  # 默认5秒
+        defaults_form.addRow("默认时长:", self.vheer_default_duration)
+
+        # 默认分辨率
+        self.vheer_default_resolution = QComboBox()
+        self.vheer_default_resolution.addItem("512x512", (512, 512))
+        self.vheer_default_resolution.addItem("768x768", (768, 768))
+        self.vheer_default_resolution.addItem("1024x1024", (1024, 1024))
+        self.vheer_default_resolution.setCurrentIndex(1)  # 默认768x768
+        defaults_form.addRow("默认分辨率:", self.vheer_default_resolution)
+
+        # 默认运动强度
+        self.vheer_default_motion = QSlider(Qt.Orientation.Horizontal)
+        self.vheer_default_motion.setRange(1, 10)
+        self.vheer_default_motion.setValue(5)
+        self.vheer_default_motion.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.vheer_default_motion.setTickInterval(1)
+
+        motion_layout = QHBoxLayout()
+        motion_layout.addWidget(self.vheer_default_motion)
+        self.vheer_motion_label = QLabel("5")
+        self.vheer_motion_label.setMinimumWidth(20)
+        motion_layout.addWidget(self.vheer_motion_label)
+        self.vheer_default_motion.valueChanged.connect(
+            lambda v: self.vheer_motion_label.setText(str(v))
+        )
+        defaults_form.addRow("默认运动强度:", motion_layout)
+
+        layout.addWidget(defaults_group)
+
+        # 高级设置组
+        advanced_group = QGroupBox("高级设置")
+        advanced_form = QFormLayout(advanced_group)
+
+        # 默认超时时间
+        self.vheer_default_timeout = QSpinBox()
+        self.vheer_default_timeout.setRange(60, 600)
+        self.vheer_default_timeout.setValue(300)
+        self.vheer_default_timeout.setSuffix(" 秒")
+        advanced_form.addRow("默认超时时间:", self.vheer_default_timeout)
+
+        # 默认无头模式
+        self.vheer_default_headless = QCheckBox("默认启用无头模式")
+        self.vheer_default_headless.setChecked(True)
+        self.vheer_default_headless.setToolTip("启用后浏览器将在后台运行，不显示界面")
+        advanced_form.addRow(self.vheer_default_headless)
+
+        # 重试次数
+        self.vheer_retry_count = QSpinBox()
+        self.vheer_retry_count.setRange(1, 5)
+        self.vheer_retry_count.setValue(2)
+        self.vheer_retry_count.setToolTip("生成失败时的重试次数")
+        advanced_form.addRow("重试次数:", self.vheer_retry_count)
+
+        layout.addWidget(advanced_group)
+
+        # 使用说明组
+        usage_group = QGroupBox("使用说明")
+        usage_layout = QVBoxLayout(usage_group)
+
+        usage_text = QLabel(
+            "📝 使用说明：\n"
+            "1. Vheer.com 是基于网页自动化的免费服务\n"
+            "2. 生成过程需要打开浏览器访问网站\n"
+            "3. 建议启用无头模式以避免干扰\n"
+            "4. 生成时间较长，请耐心等待\n"
+            "5. 如果生成失败，程序会自动重试\n\n"
+            "⚠️ 注意事项：\n"
+            "• 需要稳定的网络连接\n"
+            "• 可能受到网站访问限制\n"
+            "• 生成质量取决于原始图像质量"
+        )
+        usage_text.setWordWrap(True)
+        usage_text.setStyleSheet("color: #666; font-size: 11px; padding: 10px; background: #f9f9f9; border-radius: 5px;")
+        usage_layout.addWidget(usage_text)
+
         layout.addWidget(usage_group)
 
         layout.addStretch()

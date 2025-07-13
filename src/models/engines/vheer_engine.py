@@ -29,6 +29,7 @@ class VheerEngine(ImageGenerationEngine):
         self.api_url = None  # 将在初始化时发现
         self.output_dir = self.config.get('output_dir', 'temp/image_cache')
         self.session = None
+        self.enable_browser_automation = self.config.get('enable_browser_automation', False)
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'application/json, text/plain, */*',
@@ -86,15 +87,54 @@ class VheerEngine(ImageGenerationEngine):
             # 访问主页面获取可能的API端点信息
             async with self.session.get(f"{self.base_url}/app/text-to-image") as response:
                 if response.status == 200:
-                    # 这里需要分析页面内容或网络请求来发现实际的API端点
-                    # 暂时使用推测的端点
-                    self.api_url = f"{self.base_url}/api/generate"  # 推测的API端点
-                    logger.info(f"发现API端点: {self.api_url}")
-                    return True
+                    content = await response.text()
+
+                    # 分析页面内容查找API端点
+                    import re
+
+                    # 查找可能的API端点模式
+                    patterns = [
+                        r'fetch\(["\']([^"\']*api[^"\']*)["\']',
+                        r'axios\.[a-z]+\(["\']([^"\']*api[^"\']*)["\']',
+                        r'\.post\(["\']([^"\']*generate[^"\']*)["\']',
+                        r'action=["\']([^"\']*)["\']',
+                        r'url:["\s]*["\']([^"\']*api[^"\']*)["\']',
+                        r'endpoint:["\s]*["\']([^"\']*)["\']',
+                    ]
+
+                    found_endpoints = set()
+                    for pattern in patterns:
+                        matches = re.findall(pattern, content, re.IGNORECASE)
+                        found_endpoints.update(matches)
+
+                    # 过滤有效的端点
+                    valid_endpoints = []
+                    for endpoint in found_endpoints:
+                        if any(keyword in endpoint.lower() for keyword in ['api', 'generate', 'create']):
+                            if endpoint.startswith('/'):
+                                valid_endpoints.append(f"{self.base_url}{endpoint}")
+                            elif endpoint.startswith('http'):
+                                valid_endpoints.append(endpoint)
+
+                    if valid_endpoints:
+                        self.api_url = valid_endpoints[0]
+                        logger.info(f"发现API端点: {self.api_url}")
+                        return True
+                    else:
+                        # 使用常见的端点作为备选
+                        common_endpoints = [
+                            f"{self.base_url}/api/generate",
+                            f"{self.base_url}/api/text-to-image",
+                            f"{self.base_url}/generate",
+                            f"{self.base_url}/_next/api/generate"
+                        ]
+                        self.api_url = common_endpoints[0]
+                        logger.info(f"使用默认API端点: {self.api_url}")
+                        return True
                 else:
                     logger.error(f"无法访问Vheer主页: HTTP {response.status}")
                     return False
-                    
+
         except Exception as e:
             logger.error(f"发现API端点失败: {e}")
             return False
@@ -296,6 +336,11 @@ class VheerEngine(ImageGenerationEngine):
             if image_path:
                 return image_path
 
+            # 方法3: 尝试Selenium自动化 (如果启用)
+            image_path = await self._try_selenium_automation(config, index)
+            if image_path:
+                return image_path
+
             logger.error("所有生成方法都失败了")
             return None
 
@@ -306,50 +351,124 @@ class VheerEngine(ImageGenerationEngine):
     async def _try_direct_api_call(self, config: Dict, index: int) -> Optional[str]:
         """尝试直接API调用"""
         try:
-            # 构建请求数据
-            request_data = {
-                'prompt': config['prompt'],
-                'aspect_ratio': config['aspect_ratio'],
-                'model': config['model']
-            }
-
-            logger.info(f"尝试直接API调用: {request_data}")
-
-            # 发送POST请求到推测的API端点
-            async with self.session.post(
-                self.api_url,
-                json=request_data,
-                headers={
-                    **self.headers,
-                    'Content-Type': 'application/json',
-                    'Referer': f'{self.base_url}/app/text-to-image'
+            # 尝试多种请求数据格式
+            request_formats = [
+                # 格式1: 标准格式
+                {
+                    'prompt': config['prompt'],
+                    'aspect_ratio': config['aspect_ratio'],
+                    'model': config['model'],
+                    'width': config['width'],
+                    'height': config['height']
+                },
+                # 格式2: 简化格式
+                {
+                    'prompt': config['prompt'],
+                    'width': config['width'],
+                    'height': config['height']
+                },
+                # 格式3: 文本格式
+                {
+                    'text': config['prompt'],
+                    'size': f"{config['width']}x{config['height']}"
+                },
+                # 格式4: 表单格式
+                {
+                    'input': config['prompt'],
+                    'ratio': config['aspect_ratio']
                 }
-            ) as response:
+            ]
 
-                if response.status == 200:
-                    result = await response.json()
+            # 尝试不同的端点
+            endpoints_to_try = [
+                self.api_url,
+                f"{self.base_url}/api/v1/generate",
+                f"{self.base_url}/api/text-to-image",
+                f"{self.base_url}/_next/api/generate",
+                f"{self.base_url}/generate"
+            ]
 
-                    # 处理不同的响应格式
-                    image_url = None
-                    if 'image_url' in result:
-                        image_url = result['image_url']
-                    elif 'url' in result:
-                        image_url = result['url']
-                    elif 'data' in result and 'url' in result['data']:
-                        image_url = result['data']['url']
+            for endpoint in endpoints_to_try:
+                for request_data in request_formats:
+                    try:
+                        logger.info(f"尝试API调用: {endpoint} with {request_data}")
 
-                    if image_url:
-                        return await self._download_image(image_url, config, index)
-                    else:
-                        logger.warning("API响应中未找到图像URL")
-                        return None
-                else:
-                    logger.warning(f"API调用失败: HTTP {response.status}")
-                    return None
+                        # 发送POST请求
+                        async with self.session.post(
+                            endpoint,
+                            json=request_data,
+                            headers={
+                                **self.headers,
+                                'Content-Type': 'application/json',
+                                'Referer': f'{self.base_url}/app/text-to-image',
+                                'Origin': self.base_url
+                            }
+                        ) as response:
+
+                            if response.status == 200:
+                                content_type = response.headers.get('content-type', '')
+
+                                if 'image' in content_type:
+                                    # 直接返回图像数据
+                                    image_data = await response.read()
+                                    return await self._save_image_data(image_data, config, index)
+                                elif 'json' in content_type:
+                                    result = await response.json()
+
+                                    # 处理不同的响应格式
+                                    image_url = self._extract_image_url(result)
+                                    if image_url:
+                                        return await self._download_image(image_url, config, index)
+                                else:
+                                    # 尝试作为文本处理
+                                    text_result = await response.text()
+                                    if text_result and len(text_result) < 1000:
+                                        logger.info(f"文本响应: {text_result[:200]}...")
+                            else:
+                                logger.debug(f"端点 {endpoint} 返回状态: {response.status}")
+
+                    except Exception as e:
+                        logger.debug(f"端点 {endpoint} 调用失败: {e}")
+                        continue
+
+            logger.warning("所有API调用尝试都失败了")
+            return None
 
         except Exception as e:
-            logger.warning(f"直接API调用失败: {e}")
+            logger.error(f"直接API调用失败: {e}")
             return None
+
+    def _extract_image_url(self, result: Dict) -> Optional[str]:
+        """从响应中提取图像URL"""
+        # 尝试不同的字段名
+        url_fields = [
+            'image_url', 'url', 'imageUrl', 'image', 'src',
+            'data.url', 'data.image_url', 'data.imageUrl',
+            'result.url', 'result.image_url', 'result.imageUrl',
+            'images.0.url', 'images.0.image_url'
+        ]
+
+        for field in url_fields:
+            try:
+                if '.' in field:
+                    # 处理嵌套字段
+                    parts = field.split('.')
+                    value = result
+                    for part in parts:
+                        if part.isdigit():
+                            value = value[int(part)]
+                        else:
+                            value = value[part]
+                    if value and isinstance(value, str):
+                        return value
+                else:
+                    # 处理简单字段
+                    if field in result and result[field]:
+                        return result[field]
+            except (KeyError, IndexError, TypeError):
+                continue
+
+        return None
 
     async def _try_browser_simulation(self, config: Dict, index: int) -> Optional[str]:
         """尝试模拟浏览器请求"""
@@ -414,6 +533,204 @@ class VheerEngine(ImageGenerationEngine):
         except Exception as e:
             logger.warning(f"浏览器模拟失败: {e}")
             return None
+
+    async def _try_selenium_automation(self, config: Dict, index: int) -> Optional[str]:
+        """尝试Selenium自动化方案"""
+        try:
+            logger.info("尝试Selenium自动化方案")
+
+            # 检查是否启用了浏览器自动化
+            if not getattr(self, 'enable_browser_automation', False):
+                logger.info("浏览器自动化未启用，跳过")
+                return None
+
+            # 导入Selenium相关模块
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.common.by import By
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.chrome.options import Options
+                import time
+            except ImportError:
+                logger.warning("Selenium未安装，跳过浏览器自动化")
+                return None
+
+            # 设置Chrome选项
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")  # 无头模式
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
+
+            driver = None
+            try:
+                driver = webdriver.Chrome(options=chrome_options)
+
+                # 访问页面
+                driver.get(f"{self.base_url}/app/text-to-image")
+
+                # 等待页面加载
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+
+                # 查找输入框
+                input_selectors = [
+                    "textarea[placeholder*='prompt']",
+                    "textarea[placeholder*='describe']",
+                    "input[placeholder*='prompt']",
+                    "textarea",
+                    "input[type='text']"
+                ]
+
+                input_element = None
+                for selector in input_selectors:
+                    try:
+                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements and elements[0].is_displayed():
+                            input_element = elements[0]
+                            break
+                    except:
+                        continue
+
+                if not input_element:
+                    logger.warning("未找到输入框")
+                    return None
+
+                # 输入提示词
+                input_element.clear()
+                input_element.send_keys(config['prompt'])
+
+                # 查找生成按钮
+                button_selectors = [
+                    "button[type='submit']",
+                    "//button[contains(text(), 'Generate')]",
+                    "//button[contains(text(), '生成')]",
+                    "button"
+                ]
+
+                generate_button = None
+                for selector in button_selectors:
+                    try:
+                        if selector.startswith("//"):
+                            elements = driver.find_elements(By.XPATH, selector)
+                        else:
+                            elements = driver.find_elements(By.CSS_SELECTOR, selector)
+
+                        if elements and elements[0].is_displayed():
+                            generate_button = elements[0]
+                            break
+                    except:
+                        continue
+
+                if not generate_button:
+                    logger.warning("未找到生成按钮")
+                    return None
+
+                # 点击生成按钮
+                generate_button.click()
+
+                # 等待图像生成
+                max_wait = 60
+                start_time = time.time()
+
+                while time.time() - start_time < max_wait:
+                    # 查找生成的图像
+                    img_selectors = [
+                        "img[src*='blob:']",
+                        "img[src*='data:image']",
+                        "img[src*='generated']",
+                        ".result-image img",
+                        ".output-image img"
+                    ]
+
+                    for selector in img_selectors:
+                        try:
+                            images = driver.find_elements(By.CSS_SELECTOR, selector)
+                            for img in images:
+                                if img.is_displayed():
+                                    src = img.get_attribute('src')
+                                    if src:
+                                        # 下载图像
+                                        return await self._download_selenium_image(src, config, index, driver)
+                        except:
+                            continue
+
+                    time.sleep(2)
+
+                logger.warning("等待图像生成超时")
+                return None
+
+            finally:
+                if driver:
+                    driver.quit()
+
+        except Exception as e:
+            logger.error(f"Selenium自动化失败: {e}")
+            return None
+
+    async def _download_selenium_image(self, image_src: str, config: Dict, index: int, driver) -> Optional[str]:
+        """下载Selenium获取的图像"""
+        try:
+            import base64
+
+            if image_src.startswith('data:image'):
+                # 处理Base64图像
+                header, data = image_src.split(',', 1)
+                image_data = base64.b64decode(data)
+
+                # 保存图像
+                timestamp = int(time.time())
+                filename = f"vheer_selenium_{timestamp}_{index}.png"
+                filepath = os.path.join(self.output_dir, filename)
+
+                with open(filepath, 'wb') as f:
+                    f.write(image_data)
+
+                logger.info(f"Selenium图像保存成功: {filepath}")
+                return filepath
+
+            elif image_src.startswith('blob:'):
+                # 处理Blob URL
+                script = f"""
+                return new Promise((resolve) => {{
+                    fetch('{image_src}')
+                        .then(response => response.blob())
+                        .then(blob => {{
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.readAsDataURL(blob);
+                        }})
+                        .catch(() => resolve(null));
+                }});
+                """
+
+                data_url = driver.execute_async_script(script)
+                if data_url:
+                    return await self._download_selenium_image(data_url, config, index, driver)
+
+            else:
+                # 处理普通URL
+                async with self.session.get(image_src) as response:
+                    if response.status == 200:
+                        image_data = await response.read()
+
+                        timestamp = int(time.time())
+                        filename = f"vheer_selenium_{timestamp}_{index}.png"
+                        filepath = os.path.join(self.output_dir, filename)
+
+                        with open(filepath, 'wb') as f:
+                            f.write(image_data)
+
+                        logger.info(f"Selenium图像下载成功: {filepath}")
+                        return filepath
+
+        except Exception as e:
+            logger.error(f"下载Selenium图像失败: {e}")
+
+        return None
 
     async def _download_image(self, image_url: str, config: Dict, index: int) -> Optional[str]:
         """下载图像"""

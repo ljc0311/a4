@@ -22,6 +22,7 @@ class VideoEngineType(Enum):
     HAIPER = "haiper"
     RUNWAY_ML = "runway_ml"
     PIKA_LABS = "pika_labs"
+    VHEER = "vheer"
 
 
 class VideoEngineStatus(Enum):

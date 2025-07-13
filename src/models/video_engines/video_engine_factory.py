@@ -27,6 +27,7 @@ class VideoEngineFactory:
             VideoEngineType.DOUBAO_SEEDANCE_LITE: ('doubao_lite_engine', 'DoubaoLiteEngine'),
             VideoEngineType.REPLICATE_SVD: ('replicate_engine', 'ReplicateVideoEngine'),
             VideoEngineType.PIXVERSE: ('pixverse_engine', 'PixVerseEngine'),
+            VideoEngineType.VHEER: ('vheer_engine', 'VheerVideoEngine'),
         }
         
         for engine_type, (module_name, class_name) in engine_mappings.items():

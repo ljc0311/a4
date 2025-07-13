@@ -360,15 +360,26 @@ class VideoGenerationTab(QWidget):
             if selected_engine == "cogvideox_flash":
                 self.cogvideox_group.setVisible(True)
                 self.doubao_group.setVisible(False)
+                if hasattr(self, 'vheer_group'):
+                    self.vheer_group.setVisible(False)
             elif selected_engine in ["doubao_seedance_pro", "doubao_seedance_lite"]:
                 self.cogvideox_group.setVisible(False)
                 self.doubao_group.setVisible(True)
+                if hasattr(self, 'vheer_group'):
+                    self.vheer_group.setVisible(False)
                 # 根据引擎类型调整并发数选项
                 self._update_doubao_concurrent_options(selected_engine)
+            elif selected_engine == "vheer":
+                self.cogvideox_group.setVisible(False)
+                self.doubao_group.setVisible(False)
+                if hasattr(self, 'vheer_group'):
+                    self.vheer_group.setVisible(True)
             else:
                 # 默认显示CogVideoX设置
                 self.cogvideox_group.setVisible(True)
                 self.doubao_group.setVisible(False)
+                if hasattr(self, 'vheer_group'):
+                    self.vheer_group.setVisible(False)
 
         except Exception as e:
             logger.error(f"处理引擎选择改变时出错: {e}")
@@ -629,6 +640,7 @@ class VideoGenerationTab(QWidget):
         self.engine_combo.addItem("🌟 CogVideoX-Flash (免费)", "cogvideox_flash")
         self.engine_combo.addItem("🎭 豆包视频生成 Pro版", "doubao_seedance_pro")
         self.engine_combo.addItem("💰 豆包视频生成 Lite版 (便宜33%)", "doubao_seedance_lite")
+        self.engine_combo.addItem("🆓 Vheer.com (免费图生视频)", "vheer")
         self.engine_combo.setCurrentIndex(0)  # 默认选择CogVideoX-Flash
         self.engine_combo.currentTextChanged.connect(self.on_engine_changed)
         engine_form.addRow("选择引擎:", self.engine_combo)
@@ -731,6 +743,58 @@ class VideoGenerationTab(QWidget):
 
         # 初始化豆包并发数选项（为了确保选项正确）
         self._update_doubao_concurrent_options("doubao_seedance_pro")
+
+        # Vheer.com 免费图生视频设置组
+        self.vheer_group = QGroupBox("Vheer.com 免费图生视频设置")
+        vheer_form = QFormLayout()
+
+        # 视频格式 - 根据截图添加
+        self.vheer_format_combo = QComboBox()
+        self.vheer_format_combo.addItem("MP4", "mp4")
+        self.vheer_format_combo.addItem("WebM", "webm")
+        self.vheer_format_combo.setCurrentIndex(0)  # 默认MP4
+        vheer_form.addRow("视频格式:", self.vheer_format_combo)
+
+        # 视频时长 - 根据截图更新
+        self.vheer_duration_combo = QComboBox()
+        self.vheer_duration_combo.addItem("5秒", 5)
+        self.vheer_duration_combo.setCurrentIndex(0)  # 默认5秒
+        vheer_form.addRow("视频时长:", self.vheer_duration_combo)
+
+        # 视频帧率 - 根据截图添加
+        self.vheer_fps_combo = QComboBox()
+        self.vheer_fps_combo.addItem("24帧/秒", 24)
+        self.vheer_fps_combo.addItem("25帧/秒", 25)
+        self.vheer_fps_combo.addItem("30帧/秒", 30)
+        self.vheer_fps_combo.setCurrentIndex(0)  # 默认24帧/秒
+        vheer_form.addRow("视频帧率:", self.vheer_fps_combo)
+
+        # 等待超时时间
+        self.vheer_timeout_spin = QSpinBox()
+        self.vheer_timeout_spin.setRange(60, 600)
+        self.vheer_timeout_spin.setValue(300)
+        self.vheer_timeout_spin.setSuffix(" 秒")
+        self.vheer_timeout_spin.setToolTip("等待视频生成完成的最大时间")
+        vheer_form.addRow("超时时间:", self.vheer_timeout_spin)
+
+        # 无头模式 - 修复选项无效问题
+        self.vheer_headless_check = QCheckBox("无头模式（后台运行）")
+        self.vheer_headless_check.setChecked(False)  # 默认关闭，避免调试问题
+        self.vheer_headless_check.setToolTip("启用后浏览器将在后台运行，不显示界面。调试时建议关闭。")
+        vheer_form.addRow(self.vheer_headless_check)
+
+        # 说明文字
+        vheer_info = QLabel("🆓 Vheer.com是免费的图生视频服务，无需API密钥\n"
+                           "⚠️ 由于是网页自动化，生成速度较慢，请耐心等待")
+        vheer_info.setStyleSheet("color: #666; font-size: 10px; padding: 5px;")
+        vheer_info.setWordWrap(True)
+        vheer_form.addRow(vheer_info)
+
+        self.vheer_group.setLayout(vheer_form)
+        layout.addWidget(self.vheer_group)
+
+        # 默认隐藏Vheer设置组
+        self.vheer_group.setVisible(False)
 
         # 输出设置组
         output_group = QGroupBox("输出设置")
@@ -2308,6 +2372,28 @@ class VideoGenerationTab(QWidget):
                     'resolution': resolution_text,  # 传递给引擎的分辨率参数
                     'ratio': ratio_text  # 传递给引擎的宽高比参数
                 }
+            elif selected_engine == 'vheer':
+                # Vheer.com 免费图生视频配置
+                if target_duration is not None:
+                    # Vheer目前只支持5秒
+                    duration = 5
+                    if duration != target_duration:
+                        logger.info(f"Vheer引擎时长已调整: {target_duration}s -> {duration}s")
+                else:
+                    # 使用Vheer UI设置的时长
+                    duration = self.vheer_duration_combo.currentData()
+
+                config = {
+                    'engine': 'vheer',
+                    'duration': duration,
+                    'fps': self.vheer_fps_combo.currentData(),  # 使用用户选择的帧率
+                    'width': 1024,  # 网站自适应，使用默认值
+                    'height': 1024,  # 网站自适应，使用默认值
+                    'format': self.vheer_format_combo.currentData(),  # 视频格式
+                    'max_concurrent_tasks': 1,  # Vheer只支持单任务
+                    'timeout': self.vheer_timeout_spin.value(),
+                    'headless': self.vheer_headless_check.isChecked()
+                }
             else:
                 # CogVideoX-Flash 引擎配置（默认）
                 if target_duration is not None:
@@ -2355,6 +2441,18 @@ class VideoGenerationTab(QWidget):
                     'height': 768,
                     'motion_intensity': 0.5,
                     'max_concurrent_tasks': 2
+                }
+            elif selected_engine == 'vheer':
+                return {
+                    'engine': 'vheer',
+                    'duration': 5,  # Vheer默认5秒
+                    'fps': 24,
+                    'width': 768,
+                    'height': 768,
+                    'motion_intensity': 0.5,
+                    'max_concurrent_tasks': 1,
+                    'timeout': 300,
+                    'headless': True
                 }
             else:
                 return {

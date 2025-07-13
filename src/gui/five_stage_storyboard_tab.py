@@ -425,23 +425,31 @@ class StageWorkerThread(QThread):
             sentences = self._split_text_into_sentences(scene_original_text)
             total_sentences = len(sentences)
 
-            # 🔧 修复：根据句子数量智能计算镜头数量，避免除零错误
+            # 🔧 修复：根据文本长度智能计算镜头数量，确保每个镜头原文控制在40字左右
+            text_length = len(scene_original_text)
+
+            # 按照每25-40字生成1个镜头的原则计算
+            target_chars_per_shot = 35  # 目标每镜头35字符
+            min_chars_per_shot = 25     # 最少25字符
+            max_chars_per_shot = 45     # 最多45字符
+
+            # 基于文本长度计算建议镜头数
+            suggested_shots_by_length = max(1, text_length // target_chars_per_shot)
+
+            # 基于句子数量计算建议镜头数（作为参考）
             if total_sentences <= 0:
-                # 如果没有句子，设置默认值
-                suggested_shots = 1
-                sentences_per_shot = 1
-            elif total_sentences <= 3:
-                suggested_shots = max(1, total_sentences)
-                sentences_per_shot = 1
-            elif total_sentences <= 6:
-                suggested_shots = max(2, total_sentences // 2 + 1)
-                sentences_per_shot = max(1, total_sentences // suggested_shots)
-            elif total_sentences <= 10:
-                suggested_shots = max(3, total_sentences // 2)
-                sentences_per_shot = max(1, total_sentences // suggested_shots)
+                suggested_shots_by_sentences = 1
             else:
-                suggested_shots = max(4, min(10, total_sentences // 2))
-                sentences_per_shot = max(1, total_sentences // suggested_shots)
+                suggested_shots_by_sentences = max(1, total_sentences)
+
+            # 综合考虑文本长度和句子数量，选择合适的镜头数量
+            suggested_shots = max(suggested_shots_by_length, min(suggested_shots_by_sentences, suggested_shots_by_length + 2))
+
+            # 确保镜头数量合理
+            suggested_shots = max(1, min(suggested_shots, 15))  # 最少1个，最多15个镜头
+            sentences_per_shot = max(1, total_sentences // suggested_shots) if total_sentences > 0 else 1
+
+            logger.info(f"场景原文长度: {text_length}字符, 句子数: {total_sentences}, 建议镜头数: {suggested_shots}")
 
             # 🔧 重大改进：使用更严格的分镜生成策略
             prompt = f"""
@@ -501,10 +509,12 @@ class StageWorkerThread(QThread):
 4. 画面描述要详细且专业，包含完整的视觉信息
 5. 保持场景内镜头的连贯性
 6. **重要**：必须完整覆盖场景的所有原文内容，不能遗漏任何部分
-7. **重要**：每个镜头的"镜头原文"必须是完整的句子，不能是片段
-8. **重要**：不要生成空镜头或"下一场景"类型的无效镜头
-9. **重要**：台词/旁白只在原文有直接对话时填写，否则填写"无"
-10. 根据原文长度合理分配镜头数量，确保每个镜头有足够的内容
+7. **重要**：每个镜头的"镜头原文"必须控制在25-45个字符之间，保持自然语言风格
+8. **重要**：如果单个句子超过45字，应在合适的标点符号处拆分为多个镜头
+9. **重要**：如果相邻短句合计不超过40字且语义相关，可以合并为一个镜头
+10. **重要**：不要生成空镜头或"下一场景"类型的无效镜头
+11. **重要**：台词/旁白只在原文有直接对话时填写，否则填写"无"
+12. 优先保证镜头原文长度合理，同时确保内容完整覆盖
 """
 
             try:
@@ -925,39 +935,92 @@ class StageWorkerThread(QThread):
         return formatted
 
     def _create_sentence_assignment_table(self, sentences, suggested_shots):
-        """创建句子分配表，明确指定每个镜头应该包含哪些句子"""
+        """创建句子分配表，按照25-45字符长度智能分配句子到镜头"""
         if not sentences or suggested_shots <= 0:
             return "无句子分配"
 
-        total_sentences = len(sentences)
-        sentences_per_shot = max(1, total_sentences // suggested_shots)
+        assignment_table = "镜头分配表（按长度智能分配）：\n"
+        assignment_table += "=" * 60 + "\n"
+        assignment_table += "⚠️ 重要：每个镜头的原文应控制在25-45字符之间\n"
+        assignment_table += "=" * 60 + "\n"
 
-        assignment_table = "镜头分配表：\n"
-        assignment_table += "=" * 50 + "\n"
+        # 智能分配句子到镜头，考虑字符长度
+        shot_assignments = self._smart_assign_sentences_to_shots(sentences, suggested_shots)
 
-        sentence_index = 0
-        for shot_num in range(1, suggested_shots + 1):
-            assignment_table += f"【镜头{shot_num}】必须包含以下句子：\n"
-
-            # 计算这个镜头应该包含的句子数量
-            if shot_num == suggested_shots:
-                # 最后一个镜头包含所有剩余句子
-                shot_sentences = sentences[sentence_index:]
-            else:
-                # 其他镜头按平均分配
-                shot_sentences = sentences[sentence_index:sentence_index + sentences_per_shot]
+        for shot_num, shot_sentences in enumerate(shot_assignments, 1):
+            total_chars = sum(len(sentence) for sentence in shot_sentences)
+            assignment_table += f"【镜头{shot_num}】（预计{total_chars}字符）必须包含：\n"
 
             for i, sentence in enumerate(shot_sentences):
-                assignment_table += f"  句子{sentence_index + i + 1}: {sentence}\n"
-
-            sentence_index += len(shot_sentences)
+                assignment_table += f"  {i+1}. {sentence}\n"
             assignment_table += "\n"
 
-        assignment_table += "=" * 50 + "\n"
+        total_sentences = len(sentences)
+        assignment_table += "=" * 60 + "\n"
         assignment_table += f"总计：{total_sentences}个句子，{suggested_shots}个镜头\n"
-        assignment_table += "⚠️ 警告：每个镜头必须严格包含上述指定的句子，不能遗漏！\n"
+        assignment_table += "⚠️ 警告：每个镜头必须严格包含上述指定的句子，控制在25-45字符！\n"
 
         return assignment_table
+
+    def _smart_assign_sentences_to_shots(self, sentences, suggested_shots):
+        """智能分配句子到镜头，考虑字符长度控制在25-45字符之间"""
+        if not sentences:
+            return []
+
+        target_chars = 35  # 目标字符数
+        min_chars = 25     # 最少字符数
+        max_chars = 45     # 最多字符数
+
+        shot_assignments = []
+        current_shot = []
+        current_chars = 0
+
+        for sentence in sentences:
+            sentence_len = len(sentence)
+
+            # 如果当前镜头为空，直接添加句子
+            if not current_shot:
+                current_shot.append(sentence)
+                current_chars = sentence_len
+            # 如果添加这个句子不会超过最大字符数，且当前字符数少于目标字符数
+            elif current_chars + sentence_len <= max_chars and current_chars < target_chars:
+                current_shot.append(sentence)
+                current_chars += sentence_len
+            # 如果当前镜头已经达到最小字符数要求，开始新镜头
+            elif current_chars >= min_chars:
+                shot_assignments.append(current_shot)
+                current_shot = [sentence]
+                current_chars = sentence_len
+            # 如果当前镜头字符数不够但添加会超限，强制开始新镜头
+            else:
+                shot_assignments.append(current_shot)
+                current_shot = [sentence]
+                current_chars = sentence_len
+
+        # 添加最后一个镜头
+        if current_shot:
+            shot_assignments.append(current_shot)
+
+        # 如果镜头数量超过建议数量，合并一些短镜头
+        while len(shot_assignments) > suggested_shots and len(shot_assignments) > 1:
+            # 找到最短的两个相邻镜头进行合并
+            min_total = float('inf')
+            merge_index = 0
+
+            for i in range(len(shot_assignments) - 1):
+                total_chars = sum(len(s) for s in shot_assignments[i]) + sum(len(s) for s in shot_assignments[i+1])
+                if total_chars < min_total and total_chars <= max_chars:
+                    min_total = total_chars
+                    merge_index = i
+
+            # 合并镜头
+            if min_total <= max_chars:
+                shot_assignments[merge_index].extend(shot_assignments[merge_index + 1])
+                shot_assignments.pop(merge_index + 1)
+            else:
+                break
+
+        return shot_assignments
 
     def _validate_content_coverage(self, storyboard_response, original_text, original_sentences):
         """验证分镜脚本是否完整覆盖了原文内容"""

@@ -360,9 +360,11 @@ class VideoGenerationTab(QWidget):
             if selected_engine == "cogvideox_flash":
                 self.cogvideox_group.setVisible(True)
                 self.doubao_group.setVisible(False)
-            elif selected_engine == "doubao_seedance_pro":
+            elif selected_engine in ["doubao_seedance_pro", "doubao_seedance_lite"]:
                 self.cogvideox_group.setVisible(False)
                 self.doubao_group.setVisible(True)
+                # 根据引擎类型调整并发数选项
+                self._update_doubao_concurrent_options(selected_engine)
             else:
                 # 默认显示CogVideoX设置
                 self.cogvideox_group.setVisible(True)
@@ -370,6 +372,37 @@ class VideoGenerationTab(QWidget):
 
         except Exception as e:
             logger.error(f"处理引擎选择改变时出错: {e}")
+
+    def _update_doubao_concurrent_options(self, selected_engine: str):
+        """根据选择的豆包引擎类型更新并发数选项"""
+        try:
+            current_value = self.doubao_concurrent_tasks_combo.currentText()
+            self.doubao_concurrent_tasks_combo.clear()
+
+            if selected_engine == "doubao_seedance_pro":
+                # Pro版支持1-10并发
+                self.doubao_concurrent_tasks_combo.addItems(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"])
+                # 设置默认值为2，如果之前的值在范围内则保持
+                if current_value in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]:
+                    self.doubao_concurrent_tasks_combo.setCurrentText(current_value)
+                else:
+                    self.doubao_concurrent_tasks_combo.setCurrentText("2")
+                self.doubao_concurrent_tasks_combo.setToolTip("同时进行的视频生成任务数量（Pro版最多10个）")
+
+            elif selected_engine == "doubao_seedance_lite":
+                # Lite版支持1-5并发
+                self.doubao_concurrent_tasks_combo.addItems(["1", "2", "3", "4", "5"])
+                # 设置默认值为2，如果之前的值在范围内则保持
+                if current_value in ["1", "2", "3", "4", "5"]:
+                    self.doubao_concurrent_tasks_combo.setCurrentText(current_value)
+                else:
+                    self.doubao_concurrent_tasks_combo.setCurrentText("2")
+                self.doubao_concurrent_tasks_combo.setToolTip("同时进行的视频生成任务数量（Lite版最多5个）")
+
+            logger.info(f"已更新豆包并发数选项: {selected_engine} -> {self.doubao_concurrent_tasks_combo.count()}个选项")
+
+        except Exception as e:
+            logger.error(f"更新豆包并发数选项失败: {e}")
 
     def _optimize_prompt_for_cogvideox(self, original_prompt: str, shot_id: str = "", duration: float = 5.0) -> str:
         """使用CogVideoX优化器优化视频提示词"""
@@ -594,7 +627,8 @@ class VideoGenerationTab(QWidget):
         # 引擎选择下拉框
         self.engine_combo = QComboBox()
         self.engine_combo.addItem("🌟 CogVideoX-Flash (免费)", "cogvideox_flash")
-        self.engine_combo.addItem("🎭 豆包视频生成", "doubao_seedance_pro")
+        self.engine_combo.addItem("🎭 豆包视频生成 Pro版", "doubao_seedance_pro")
+        self.engine_combo.addItem("💰 豆包视频生成 Lite版 (便宜33%)", "doubao_seedance_lite")
         self.engine_combo.setCurrentIndex(0)  # 默认选择CogVideoX-Flash
         self.engine_combo.currentTextChanged.connect(self.on_engine_changed)
         engine_form.addRow("选择引擎:", self.engine_combo)
@@ -682,11 +716,11 @@ class VideoGenerationTab(QWidget):
         doubao_fps_label.setStyleSheet("color: #666; font-style: italic;")
         doubao_form.addRow("帧率:", doubao_fps_label)
 
-        # 并发任务数 - 豆包建议较低并发
+        # 并发任务数 - 豆包Pro支持10并发，Lite支持5并发
         self.doubao_concurrent_tasks_combo = QComboBox()
-        self.doubao_concurrent_tasks_combo.addItems(["1", "2"])
+        self.doubao_concurrent_tasks_combo.addItems(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"])
         self.doubao_concurrent_tasks_combo.setCurrentText("2")
-        self.doubao_concurrent_tasks_combo.setToolTip("同时进行的视频生成任务数量（豆包建议较低并发）")
+        self.doubao_concurrent_tasks_combo.setToolTip("同时进行的视频生成任务数量（Pro版最多10个，Lite版最多5个）")
         doubao_form.addRow("并发任务数:", self.doubao_concurrent_tasks_combo)
 
         self.doubao_group.setLayout(doubao_form)
@@ -694,6 +728,9 @@ class VideoGenerationTab(QWidget):
 
         # 默认隐藏豆包设置组
         self.doubao_group.setVisible(False)
+
+        # 初始化豆包并发数选项（为了确保选项正确）
+        self._update_doubao_concurrent_options("doubao_seedance_pro")
 
         # 输出设置组
         output_group = QGroupBox("输出设置")
@@ -778,6 +815,13 @@ class VideoGenerationTab(QWidget):
         self.open_output_btn.clicked.connect(self.open_output_directory)
         self.open_output_btn.setMaximumHeight(25)
         status_control_layout.addWidget(self.open_output_btn)
+
+        # 清理缺失视频数据按钮
+        self.clean_missing_btn = QPushButton("🧹 清理缺失数据")
+        self.clean_missing_btn.clicked.connect(self.clean_all_missing_video_data)
+        self.clean_missing_btn.setMaximumHeight(25)
+        self.clean_missing_btn.setToolTip("清理项目中已删除视频文件的数据记录")
+        status_control_layout.addWidget(self.clean_missing_btn)
 
         progress_layout.addLayout(status_control_layout)
         parent_layout.addWidget(progress_frame)
@@ -1694,8 +1738,15 @@ class VideoGenerationTab(QWidget):
                 video_layout = QHBoxLayout(video_widget)
                 video_layout.setContentsMargins(2, 2, 2, 2)
 
+                # 检查视频文件是否存在，如果不存在则清理数据
+                video_exists = scene_data['video_path'] and os.path.exists(scene_data['video_path'])
+                if scene_data['video_path'] and not video_exists:
+                    # 视频文件已被删除，清理项目数据
+                    self._clean_missing_video_data(scene_data)
+                    scene_data['video_path'] = ''  # 清空当前数据中的路径
+
                 # 如果有视频，添加缩略图和播放按钮
-                if scene_data['video_path'] and os.path.exists(scene_data['video_path']):
+                if video_exists:
                     logger.debug(f"尝试为视频生成缩略图: {scene_data['video_path']}")
                     # 生成视频缩略图
                     video_thumbnail = self._generate_video_thumbnail(scene_data['video_path'])
@@ -1992,8 +2043,16 @@ class VideoGenerationTab(QWidget):
     def start_generation(self, scenes_to_generate):
         """开始视频生成（并发模式）"""
         try:
-            # 🔧 修复：动态获取用户设置的并发数
-            user_concurrent = int(self.concurrent_tasks_combo.currentText())
+            # 🔧 修复：动态获取用户设置的并发数（根据选择的引擎）
+            selected_engine = self.engine_combo.currentData() if hasattr(self, 'engine_combo') else 'cogvideox_flash'
+
+            if selected_engine in ['doubao_seedance_pro', 'doubao_seedance_lite']:
+                # 豆包引擎使用豆包的并发数设置
+                user_concurrent = int(self.doubao_concurrent_tasks_combo.currentText())
+            else:
+                # CogVideoX引擎使用CogVideoX的并发数设置
+                user_concurrent = int(self.concurrent_tasks_combo.currentText())
+
             self.max_concurrent_videos = user_concurrent
             logger.info(f"使用用户设置的并发数: {self.max_concurrent_videos}")
 
@@ -2078,7 +2137,8 @@ class VideoGenerationTab(QWidget):
             else:
                 # 单片段生成模式
                 audio_hint = scene.get('audio_hint')
-                generation_config = self.get_generation_config(image_path, voice_duration if voice_duration > 0 else None, audio_hint)
+                # 不传递voice_duration，让用户界面设置优先
+                generation_config = self.get_generation_config(image_path, None, audio_hint)
 
                 # 调试日志：检查生成配置
                 logger.info(f"生成配置 - 分辨率: {generation_config.get('width')}x{generation_config.get('height')}, 引擎: {generation_config.get('engine')}")
@@ -2219,8 +2279,8 @@ class VideoGenerationTab(QWidget):
             selected_engine = self.engine_combo.currentData() if hasattr(self, 'engine_combo') else 'cogvideox_flash'
 
             # 根据引擎类型确定参数
-            if selected_engine == 'doubao_seedance_pro':
-                # 豆包引擎配置
+            if selected_engine in ['doubao_seedance_pro', 'doubao_seedance_lite']:
+                # 豆包引擎配置（Pro版和Lite版）
                 if target_duration is not None:
                     # 豆包支持5秒和10秒，选择最接近的
                     duration = 5 if target_duration <= 7.5 else 10
@@ -2238,7 +2298,7 @@ class VideoGenerationTab(QWidget):
                 width, height = self._calculate_doubao_dimensions(resolution_text, ratio_text)
 
                 config = {
-                    'engine': 'doubao_seedance_pro',
+                    'engine': selected_engine,  # 使用实际选择的引擎
                     'duration': duration,
                     'fps': 30,  # 豆包根据分辨率自动确定帧率
                     'width': width,
@@ -2286,11 +2346,11 @@ class VideoGenerationTab(QWidget):
             except:
                 pass
 
-            if selected_engine == 'doubao_seedance_pro':
+            if selected_engine in ['doubao_seedance_pro', 'doubao_seedance_lite']:
                 return {
-                    'engine': 'doubao_seedance_pro',
-                    'duration': 4,
-                    'fps': 16,
+                    'engine': selected_engine,
+                    'duration': 5,  # 豆包默认5秒
+                    'fps': 30,
                     'width': 768,
                     'height': 768,
                     'motion_intensity': 0.5,
@@ -3055,6 +3115,120 @@ class VideoGenerationTab(QWidget):
 
         except Exception as e:
             logger.error(f"记录视频生成信息失败: {e}")
+
+    def _clean_missing_video_data(self, scene_data):
+        """清理已删除视频的项目数据"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                return
+
+            shot_id = scene_data.get('shot_id', '')
+            if not shot_id:
+                return
+
+            project_data = self.project_manager.current_project
+            data_cleaned = False
+
+            # 清理shot_mappings中的视频路径
+            if 'shot_mappings' in project_data and shot_id in project_data['shot_mappings']:
+                if 'video_path' in project_data['shot_mappings'][shot_id]:
+                    del project_data['shot_mappings'][shot_id]['video_path']
+                    data_cleaned = True
+                if 'video_status' in project_data['shot_mappings'][shot_id]:
+                    project_data['shot_mappings'][shot_id]['video_status'] = 'missing'
+                    data_cleaned = True
+
+            # 清理video_generation记录中的相关视频
+            if 'video_generation' in project_data and 'videos' in project_data['video_generation']:
+                videos_to_remove = []
+                for i, video_record in enumerate(project_data['video_generation']['videos']):
+                    if (video_record.get('shot_id') == shot_id and
+                        video_record.get('video_path') and
+                        not os.path.exists(video_record['video_path'])):
+                        videos_to_remove.append(i)
+
+                # 从后往前删除，避免索引变化
+                for i in reversed(videos_to_remove):
+                    del project_data['video_generation']['videos'][i]
+                    data_cleaned = True
+
+            # 如果清理了数据，保存项目
+            if data_cleaned:
+                self.project_manager.save_project()
+                logger.info(f"已清理镜头 {shot_id} 的缺失视频数据")
+
+        except Exception as e:
+            logger.error(f"清理缺失视频数据失败: {e}")
+
+    def clean_all_missing_video_data(self):
+        """清理所有缺失的视频数据"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                QMessageBox.warning(self, "警告", "没有当前项目")
+                return
+
+            # 确认对话框
+            reply = QMessageBox.question(
+                self, "确认清理",
+                "确定要清理所有已删除视频文件的数据记录吗？\n"
+                "这将删除项目中指向不存在文件的视频路径记录。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            project_data = self.project_manager.current_project
+            cleaned_count = 0
+
+            # 清理shot_mappings中的缺失视频
+            if 'shot_mappings' in project_data:
+                for shot_id, mapping_data in project_data['shot_mappings'].items():
+                    if ('video_path' in mapping_data and
+                        mapping_data['video_path'] and
+                        not os.path.exists(mapping_data['video_path'])):
+                        del mapping_data['video_path']
+                        mapping_data['video_status'] = 'missing'
+                        cleaned_count += 1
+                        logger.info(f"清理shot_mappings中的缺失视频: {shot_id}")
+
+            # 清理video_generation记录中的缺失视频
+            if 'video_generation' in project_data and 'videos' in project_data['video_generation']:
+                videos_to_remove = []
+                for i, video_record in enumerate(project_data['video_generation']['videos']):
+                    if (video_record.get('video_path') and
+                        not os.path.exists(video_record['video_path'])):
+                        videos_to_remove.append(i)
+
+                # 从后往前删除，避免索引变化
+                for i in reversed(videos_to_remove):
+                    del project_data['video_generation']['videos'][i]
+                    cleaned_count += 1
+
+            # 清理current_scenes中的缺失视频路径
+            for scene_data in self.current_scenes:
+                if (scene_data.get('video_path') and
+                    not os.path.exists(scene_data['video_path'])):
+                    scene_data['video_path'] = ''
+                    cleaned_count += 1
+
+            # 保存项目数据
+            if cleaned_count > 0:
+                self.project_manager.save_project()
+                # 刷新界面
+                self.update_scene_table()
+                QMessageBox.information(
+                    self, "清理完成",
+                    f"已清理 {cleaned_count} 个缺失视频的数据记录"
+                )
+                logger.info(f"清理完成，共清理 {cleaned_count} 个缺失视频数据")
+            else:
+                QMessageBox.information(self, "清理完成", "没有发现需要清理的缺失视频数据")
+
+        except Exception as e:
+            logger.error(f"清理所有缺失视频数据失败: {e}")
+            QMessageBox.critical(self, "错误", f"清理失败: {e}")
 
     def play_video(self, video_path):
         """播放视频"""

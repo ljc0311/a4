@@ -72,18 +72,34 @@ class VideoCompositionWorker(QThread):
             for i, segment in enumerate(self.segments):
                 logger.info(f"片段 {i+1}: video={segment.video_path}, audio={segment.audio_path}")
 
+                # 重新获取准确的配音时长（不信任segment.duration）
+                actual_duration = segment.duration  # 默认使用segment中的时长
+
+                if segment.audio_path and os.path.exists(segment.audio_path):
+                    # 使用可靠的音频时长检测器重新获取时长
+                    try:
+                        from src.utils.reliable_audio_duration import get_audio_duration
+                        audio_duration = get_audio_duration(segment.audio_path)
+                        if audio_duration > 0:
+                            actual_duration = audio_duration
+                            logger.info(f"✅ 重新获取片段 {i+1} 准确时长: {actual_duration:.2f}s (原时长: {segment.duration:.2f}s)")
+                        else:
+                            logger.warning(f"⚠️ 无法获取片段 {i+1} 音频时长，使用原时长: {segment.duration:.2f}s")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 获取片段 {i+1} 音频时长失败: {e}，使用原时长: {segment.duration:.2f}s")
+
                 if os.path.exists(segment.video_path):
                     video_segments.append({
                         'video_path': segment.video_path,
-                        'duration': segment.duration,
+                        'duration': actual_duration,  # 使用准确的时长
                         'subtitle_text': segment.subtitle_text
                     })
 
                 if segment.audio_path and os.path.exists(segment.audio_path):
-                    logger.info(f"添加音频片段: {segment.audio_path}")
+                    logger.info(f"添加音频片段: {segment.audio_path} (时长: {actual_duration:.2f}s)")
                     audio_segments.append({
                         'audio_path': segment.audio_path,
-                        'duration': segment.duration
+                        'duration': actual_duration  # 使用准确的时长
                     })
                 else:
                     logger.warning(f"音频文件不存在或路径为空: {segment.audio_path}")
@@ -183,8 +199,8 @@ class VideoCompositionTab(QWidget):
         right_widget = self.create_right_panel()
         splitter.addWidget(right_widget)
         
-        # 设置分割器比例
-        splitter.setSizes([400, 300])
+        # 设置分割器比例 - 给左侧更多空间用于视频列表
+        splitter.setSizes([500, 400])
         main_layout.addWidget(splitter)
         
         self.setLayout(main_layout)
@@ -217,10 +233,13 @@ class VideoCompositionTab(QWidget):
         self.segments_table.setColumnWidth(2, 80)
         self.segments_table.setColumnWidth(3, 80)
         self.segments_table.setColumnWidth(4, 100)
-        
+
+        # 设置表格最小高度，让它占用更多空间
+        self.segments_table.setMinimumHeight(400)
+
         segments_layout.addWidget(self.segments_table)
         segments_group.setLayout(segments_layout)
-        layout.addWidget(segments_group)
+        layout.addWidget(segments_group, 2)  # 给视频列表更大的拉伸权重
         
         # 合成设置
         settings_group = QGroupBox("⚙️ 合成设置")
@@ -257,7 +276,7 @@ class VideoCompositionTab(QWidget):
         settings_layout.addRow("分辨率:", self.resolution_combo)
         
         settings_group.setLayout(settings_layout)
-        layout.addWidget(settings_group)
+        layout.addWidget(settings_group, 0)  # 不拉伸
 
         # 字幕样式设置
         subtitle_group = QGroupBox("📝 字幕样式")
@@ -310,119 +329,8 @@ class VideoCompositionTab(QWidget):
         subtitle_layout.addLayout(position_layout)
 
         subtitle_group.setLayout(subtitle_layout)
-        layout.addWidget(subtitle_group)
+        layout.addWidget(subtitle_group, 0)  # 不拉伸
 
-        # 转场效果设置
-        transition_group = QGroupBox("🎞️ 转场效果")
-        transition_layout = QVBoxLayout()
-
-        # 转场模式选择
-        transition_mode_layout = QHBoxLayout()
-        transition_mode_layout.addWidget(QLabel("转场模式:"))
-        self.transition_mode_combo = QComboBox()
-        self.transition_mode_combo.addItems(["随机转场", "统一转场", "自定义转场"])
-        self.transition_mode_combo.setCurrentText("随机转场")
-        # 延迟连接信号，避免初始化时触发
-        # self.transition_mode_combo.currentTextChanged.connect(self.on_transition_mode_changed)
-        transition_mode_layout.addWidget(self.transition_mode_combo)
-        transition_layout.addLayout(transition_mode_layout)
-
-        # 统一转场类型选择（默认隐藏）
-        self.uniform_transition_layout = QHBoxLayout()
-        self.uniform_transition_layout.addWidget(QLabel("转场类型:"))
-        self.uniform_transition_combo = QComboBox()
-        self.uniform_transition_combo.addItems([
-            "淡入淡出", "左滑", "右滑", "上滑", "下滑",
-            "缩放", "旋转", "溶解", "擦除", "推拉"
-        ])
-        self.uniform_transition_combo.setCurrentText("淡入淡出")
-        self.uniform_transition_layout.addWidget(self.uniform_transition_combo)
-        transition_layout.addLayout(self.uniform_transition_layout)
-
-        # 转场时长设置
-        duration_layout = QHBoxLayout()
-        duration_layout.addWidget(QLabel("转场时长:"))
-        self.transition_duration_spinbox = QDoubleSpinBox()
-        self.transition_duration_spinbox.setRange(0.1, 3.0)
-        self.transition_duration_spinbox.setValue(0.5)
-        self.transition_duration_spinbox.setSuffix(" 秒")
-        self.transition_duration_spinbox.setSingleStep(0.1)
-        duration_layout.addWidget(self.transition_duration_spinbox)
-
-        # 转场强度
-        duration_layout.addWidget(QLabel("转场强度:"))
-        self.transition_intensity_slider = QSlider(Qt.Horizontal)
-        self.transition_intensity_slider.setRange(1, 10)
-        self.transition_intensity_slider.setValue(5)
-        self.transition_intensity_label = QLabel("5")
-        self.transition_intensity_slider.valueChanged.connect(
-            lambda v: self.transition_intensity_label.setText(str(v))
-        )
-        duration_layout.addWidget(self.transition_intensity_slider)
-        duration_layout.addWidget(self.transition_intensity_label)
-        transition_layout.addLayout(duration_layout)
-
-        # 初始隐藏统一转场选项 - 安全方式
-        try:
-            self.uniform_transition_combo.setVisible(False)
-            # 安全地隐藏布局中的控件
-            if hasattr(self, 'uniform_transition_layout') and self.uniform_transition_layout:
-                for i in range(self.uniform_transition_layout.count()):
-                    item = self.uniform_transition_layout.itemAt(i)
-                    if item and item.widget():
-                        item.widget().setVisible(False)
-        except Exception as e:
-            logger.warning(f"隐藏统一转场选项时出错: {e}")
-
-        transition_group.setLayout(transition_layout)
-        layout.addWidget(transition_group)
-
-        # 背景音乐设置
-        music_group = QGroupBox("🎵 背景音乐")
-        music_layout = QVBoxLayout()
-        
-        # 音乐文件选择
-        music_file_layout = QHBoxLayout()
-        self.music_path_label = QLabel("未选择音乐文件")
-        self.music_path_label.setStyleSheet("color: #666; font-style: italic;")
-        music_file_layout.addWidget(self.music_path_label)
-        
-        select_music_btn = QPushButton("选择音乐")
-        select_music_btn.clicked.connect(self.select_background_music)
-        music_file_layout.addWidget(select_music_btn)
-        
-        music_layout.addLayout(music_file_layout)
-        
-        # 音乐音量
-        volume_layout = QHBoxLayout()
-        volume_layout.addWidget(QLabel("音量:"))
-        
-        self.music_volume_slider = QSlider(Qt.Horizontal)
-        self.music_volume_slider.setRange(0, 100)
-        self.music_volume_slider.setValue(30)
-        self.music_volume_slider.valueChanged.connect(self.update_volume_label)
-        volume_layout.addWidget(self.music_volume_slider)
-        
-        self.volume_label = QLabel("30%")
-        volume_layout.addWidget(self.volume_label)
-        
-        music_layout.addLayout(volume_layout)
-        
-        # 音乐选项
-        self.loop_music_checkbox = QCheckBox("循环播放")
-        self.loop_music_checkbox.setChecked(True)
-        music_layout.addWidget(self.loop_music_checkbox)
-        
-        self.fade_in_checkbox = QCheckBox("淡入效果")
-        self.fade_in_checkbox.setChecked(True)
-        music_layout.addWidget(self.fade_in_checkbox)
-        
-        self.fade_out_checkbox = QCheckBox("淡出效果")
-        self.fade_out_checkbox.setChecked(True)
-        music_layout.addWidget(self.fade_out_checkbox)
-        
-        music_group.setLayout(music_layout)
-        layout.addWidget(music_group)
         
         widget.setLayout(layout)
         return widget
@@ -444,19 +352,126 @@ class VideoCompositionTab(QWidget):
         
         preview_group.setLayout(preview_layout)
         layout.addWidget(preview_group)
-        
+
+        # 转场效果设置
+        transition_group = QGroupBox("🎞️ 转场效果")
+        transition_layout = QVBoxLayout()
+
+        # 转场模式选择
+        transition_mode_layout = QHBoxLayout()
+        transition_mode_layout.addWidget(QLabel("转场模式:"))
+        self.transition_mode_combo = QComboBox()
+        self.transition_mode_combo.addItems(["随机转场", "统一转场", "自定义转场"])
+        self.transition_mode_combo.setCurrentText("随机转场")
+        transition_mode_layout.addWidget(self.transition_mode_combo)
+        transition_layout.addLayout(transition_mode_layout)
+
+        # 统一转场类型选择（默认隐藏）
+        self.uniform_transition_layout = QHBoxLayout()
+        self.uniform_transition_layout.addWidget(QLabel("转场类型:"))
+        self.uniform_transition_combo = QComboBox()
+        self.uniform_transition_combo.addItems([
+            "淡入淡出", "左滑", "右滑", "上滑", "下滑",
+            "缩放", "旋转", "溶解", "擦除", "推拉"
+        ])
+        self.uniform_transition_combo.setCurrentText("淡入淡出")
+        self.uniform_transition_layout.addWidget(self.uniform_transition_combo)
+        transition_layout.addLayout(self.uniform_transition_layout)
+
+        # 转场时长和强度设置
+        duration_layout = QHBoxLayout()
+        duration_layout.addWidget(QLabel("转场时长:"))
+        self.transition_duration_spinbox = QDoubleSpinBox()
+        self.transition_duration_spinbox.setRange(0.1, 3.0)
+        self.transition_duration_spinbox.setValue(0.5)
+        self.transition_duration_spinbox.setSuffix(" 秒")
+        self.transition_duration_spinbox.setSingleStep(0.1)
+        duration_layout.addWidget(self.transition_duration_spinbox)
+        transition_layout.addLayout(duration_layout)
+
+        # 转场强度
+        intensity_layout = QHBoxLayout()
+        intensity_layout.addWidget(QLabel("转场强度:"))
+        self.transition_intensity_slider = QSlider(Qt.Horizontal)
+        self.transition_intensity_slider.setRange(1, 10)
+        self.transition_intensity_slider.setValue(5)
+        self.transition_intensity_label = QLabel("5")
+        self.transition_intensity_slider.valueChanged.connect(
+            lambda v: self.transition_intensity_label.setText(str(v))
+        )
+        intensity_layout.addWidget(self.transition_intensity_slider)
+        intensity_layout.addWidget(self.transition_intensity_label)
+        transition_layout.addLayout(intensity_layout)
+
+        # 初始隐藏统一转场选项
+        try:
+            self.uniform_transition_combo.setVisible(False)
+            if hasattr(self, 'uniform_transition_layout') and self.uniform_transition_layout:
+                for i in range(self.uniform_transition_layout.count()):
+                    item = self.uniform_transition_layout.itemAt(i)
+                    if item and item.widget():
+                        item.widget().setVisible(False)
+        except Exception as e:
+            logger.warning(f"隐藏统一转场选项时出错: {e}")
+
+        transition_group.setLayout(transition_layout)
+        layout.addWidget(transition_group)
+
+        # 背景音乐设置
+        music_group = QGroupBox("🎵 背景音乐")
+        music_layout = QVBoxLayout()
+
+        # 音乐文件选择
+        music_file_layout = QHBoxLayout()
+        self.music_path_label = QLabel("未选择音乐文件")
+        self.music_path_label.setStyleSheet("color: #666; font-style: italic;")
+        music_file_layout.addWidget(self.music_path_label)
+
+        select_music_btn = QPushButton("选择音乐")
+        select_music_btn.clicked.connect(self.select_background_music)
+        music_file_layout.addWidget(select_music_btn)
+        music_layout.addLayout(music_file_layout)
+
+        # 音乐音量
+        volume_layout = QHBoxLayout()
+        volume_layout.addWidget(QLabel("音量:"))
+        self.music_volume_slider = QSlider(Qt.Horizontal)
+        self.music_volume_slider.setRange(0, 100)
+        self.music_volume_slider.setValue(30)
+        self.music_volume_slider.valueChanged.connect(self.update_volume_label)
+        volume_layout.addWidget(self.music_volume_slider)
+        self.volume_label = QLabel("30%")
+        volume_layout.addWidget(self.volume_label)
+        music_layout.addLayout(volume_layout)
+
+        # 音乐选项
+        self.loop_music_checkbox = QCheckBox("循环播放")
+        self.loop_music_checkbox.setChecked(True)
+        music_layout.addWidget(self.loop_music_checkbox)
+
+        self.fade_in_checkbox = QCheckBox("淡入效果")
+        self.fade_in_checkbox.setChecked(True)
+        music_layout.addWidget(self.fade_in_checkbox)
+
+        self.fade_out_checkbox = QCheckBox("淡出效果")
+        self.fade_out_checkbox.setChecked(True)
+        music_layout.addWidget(self.fade_out_checkbox)
+
+        music_group.setLayout(music_layout)
+        layout.addWidget(music_group)
+
         # 进度区域
         progress_group = QGroupBox("📊 合成进度")
         progress_layout = QVBoxLayout()
-        
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         progress_layout.addWidget(self.progress_bar)
-        
+
         self.progress_label = QLabel("")
         self.progress_label.setVisible(False)
         progress_layout.addWidget(self.progress_label)
-        
+
         progress_group.setLayout(progress_layout)
         layout.addWidget(progress_group)
         
@@ -672,35 +687,51 @@ class VideoCompositionTab(QWidget):
                 # 获取配音时长（优先使用配音时长，而不是视频时长）
                 duration = 5.0  # 默认时长
 
-                # 方法1：从音频文件获取实际时长
+                # 方法1：从音频文件获取实际时长（最可靠的方法）
                 if audio_path and os.path.exists(audio_path):
                     audio_duration = self.get_audio_duration(audio_path)
                     if audio_duration > 0:
                         duration = audio_duration
-                        logger.info(f"从音频文件获取时长: {shot_id} -> {duration:.2f}s")
+                        logger.info(f"✅ 从音频文件获取时长: {shot_id} -> {duration:.2f}s")
+                    else:
+                        logger.warning(f"⚠️ 音频文件存在但无法获取时长: {audio_path}")
 
-                # 方法2：从项目数据中的配音信息获取
+                # 方法2：从项目数据中的配音信息获取（备用方案）
                 if duration == 5.0 and hasattr(self, 'project_manager') and self.project_manager:
                     project_data = self.project_manager.current_project
                     if project_data:
                         voice_segments = project_data.get('voice_generation', {}).get('voice_segments', [])
                         for voice_seg in voice_segments:
-                            if voice_seg.get('shot_id') == shot_id or voice_seg.get('segment_id') == shot_id:
+                            # 匹配shot_id或segment_id
+                            voice_shot_id = voice_seg.get('shot_id', '')
+                            voice_segment_id = voice_seg.get('segment_id', '')
+
+                            if voice_shot_id == shot_id or voice_segment_id == shot_id:
+                                # 尝试从配音数据中获取时长
                                 voice_duration = voice_seg.get('duration', 0.0)
                                 if voice_duration > 0:
                                     duration = voice_duration
-                                    logger.info(f"从配音数据获取时长: {shot_id} -> {duration:.2f}s")
+                                    logger.info(f"📊 从配音数据获取时长: {shot_id} -> {duration:.2f}s")
                                     break
 
-                # 方法3：备用方案，使用视频时长
+                                # 如果配音数据中没有时长，尝试从音频文件路径获取
+                                voice_audio_path = voice_seg.get('audio_path', '')
+                                if voice_audio_path and os.path.exists(voice_audio_path):
+                                    voice_audio_duration = self.get_audio_duration(voice_audio_path)
+                                    if voice_audio_duration > 0:
+                                        duration = voice_audio_duration
+                                        logger.info(f"🎵 从配音数据中的音频文件获取时长: {shot_id} -> {duration:.2f}s")
+                                        break
+
+                # 方法3：最后备用方案，使用视频时长（不推荐，因为视频时长可能不准确）
                 if duration == 5.0:
                     video_duration = video_data.get('duration', 0.0)
                     if video_duration > 0:
                         duration = video_duration
-                        logger.info(f"使用视频时长: {shot_id} -> {duration:.2f}s")
+                        logger.warning(f"⚠️ 使用视频时长（可能不准确）: {shot_id} -> {duration:.2f}s")
                     else:
                         duration = self.get_video_duration(video_path)
-                        logger.info(f"从视频文件获取时长: {shot_id} -> {duration:.2f}s")
+                        logger.warning(f"⚠️ 从视频文件获取时长（可能不准确）: {shot_id} -> {duration:.2f}s")
 
                 # 获取字幕文本（从字幕文件中获取）
                 subtitle_text = ""
@@ -790,35 +821,72 @@ class VideoCompositionTab(QWidget):
                 return 5.0
 
     def get_audio_duration(self, audio_path: str) -> float:
-        """获取音频文件时长"""
+        """获取音频文件时长 - 使用多种方法确保准确性"""
         try:
             if not audio_path or not os.path.exists(audio_path):
+                logger.warning(f"音频文件不存在: {audio_path}")
                 return 0.0
 
-            # 方法1：尝试使用mutagen（最可靠）
+            # 方法1：使用可靠的音频时长检测器
+            try:
+                from src.utils.reliable_audio_duration import get_audio_duration
+                duration = get_audio_duration(audio_path)
+                if duration > 0:
+                    logger.debug(f"✅ 可靠音频检测器获取时长成功: {os.path.basename(audio_path)} -> {duration:.2f}s")
+                    return duration
+            except ImportError:
+                logger.debug("可靠音频检测器未找到，尝试其他方法")
+            except Exception as e:
+                logger.debug(f"可靠音频检测器失败: {e}")
+
+            # 方法2：尝试使用mutagen（最可靠的传统方法）
             try:
                 from mutagen import File
                 audio_file = File(audio_path)
                 if audio_file and hasattr(audio_file, 'info') and hasattr(audio_file.info, 'length'):
                     duration = float(audio_file.info.length)
-                    logger.debug(f"mutagen获取音频时长成功: {audio_path} -> {duration:.2f}s")
+                    logger.debug(f"✅ mutagen获取音频时长成功: {os.path.basename(audio_path)} -> {duration:.2f}s")
                     return duration
             except ImportError:
                 logger.debug("mutagen未安装，尝试其他方法")
             except Exception as e:
                 logger.debug(f"mutagen获取音频时长失败: {e}")
 
-            # 方法2：使用文件大小估算
+            # 方法3：使用pydub（如果可用）
+            try:
+                from pydub import AudioSegment
+                audio = AudioSegment.from_file(audio_path)
+                duration = len(audio) / 1000.0  # 转换为秒
+                logger.debug(f"✅ pydub获取音频时长成功: {os.path.basename(audio_path)} -> {duration:.2f}s")
+                return duration
+            except ImportError:
+                logger.debug("pydub未安装，尝试其他方法")
+            except Exception as e:
+                logger.debug(f"pydub获取音频时长失败: {e}")
+
+            # 方法4：使用文件大小估算（最后的备用方案）
             try:
                 file_size = os.path.getsize(audio_path)
-                # 假设平均比特率为128kbps
-                estimated_duration = file_size / (128 * 1024 / 8)
-                estimated_duration = max(1.0, min(estimated_duration, 30.0))  # 限制在1-30秒之间
-                logger.debug(f"文件大小估算音频时长: {audio_path} -> {estimated_duration:.2f}s")
+                # 根据文件扩展名调整比特率估算
+                ext = os.path.splitext(audio_path)[1].lower()
+                if ext == '.mp3':
+                    # MP3通常128kbps
+                    bitrate = 128 * 1024 / 8  # 字节/秒
+                elif ext == '.wav':
+                    # WAV通常1411kbps (44.1kHz, 16bit, stereo)
+                    bitrate = 1411 * 1024 / 8
+                else:
+                    # 默认128kbps
+                    bitrate = 128 * 1024 / 8
+
+                estimated_duration = file_size / bitrate
+                estimated_duration = max(1.0, min(estimated_duration, 60.0))  # 限制在1-60秒之间
+                logger.debug(f"⚠️ 文件大小估算音频时长: {os.path.basename(audio_path)} -> {estimated_duration:.2f}s")
                 return estimated_duration
             except Exception as e:
                 logger.debug(f"文件大小估算失败: {e}")
 
+            logger.warning(f"❌ 所有方法都无法获取音频时长: {os.path.basename(audio_path)}")
             return 0.0
 
         except Exception as e:

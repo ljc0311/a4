@@ -161,7 +161,10 @@ class NewMainWindow(QMainWindow):
         from src.utils.memory_optimizer import MemoryMonitor, ImageMemoryManager
         self.memory_monitor = MemoryMonitor()
         self.image_memory_manager = ImageMemoryManager()
-        
+
+        # 初始化显示设置
+        self.init_display_settings()
+
         # 初始化UI
         self.init_ui()
         
@@ -182,7 +185,65 @@ class NewMainWindow(QMainWindow):
         self.update_text_placeholder()
         
         logger.info("新主窗口初始化完成")
-    
+
+    def init_display_settings(self):
+        """初始化显示设置"""
+        try:
+            # 初始化显示配置
+            from src.utils.display_config import get_display_config
+            self.display_config = get_display_config()
+
+            # 初始化DPI适配器
+            from src.utils.dpi_adapter import get_dpi_adapter
+            self.dpi_adapter = get_dpi_adapter()
+
+            # 应用保存的字体设置
+            font_config = self.display_config.get_font_config()
+            if font_config.get("auto_size", True):
+                # 使用DPI适配器的推荐字体大小
+                font_size = self.dpi_adapter.get_recommended_font_size()
+            else:
+                # 使用保存的字体大小
+                font_size = font_config.get("size", 10)
+
+            font_family = font_config.get("family", "Microsoft YaHei UI")
+
+            # 更新DPI适配器设置
+            self.dpi_adapter.font_family = font_family
+            self.dpi_adapter.current_font_size = font_size
+
+            # 应用DPI设置
+            dpi_config = self.display_config.get_dpi_config()
+            if dpi_config.get("auto_scaling", True):
+                self.dpi_adapter.set_auto_dpi_scaling(True)
+            else:
+                custom_factor = dpi_config.get("custom_scale_factor", 1.0)
+                self.dpi_adapter.set_custom_scale_factor(custom_factor)
+                self.dpi_adapter.set_auto_dpi_scaling(False)
+
+            # 应用字体到应用程序
+            font = self.dpi_adapter.create_scaled_font(family=font_family, size=font_size)
+            app = QApplication.instance()
+            if app:
+                app.setFont(font)
+
+            # 应用窗口设置
+            window_config = self.display_config.get_window_config()
+            if window_config.get("auto_resize", True):
+                # 使用自适应窗口大小
+                width, height = self.dpi_adapter.get_adaptive_window_size()
+                self.resize(width, height)
+            else:
+                # 使用保存的窗口大小
+                width = window_config.get("default_width", 1200)
+                height = window_config.get("default_height", 800)
+                self.resize(width, height)
+
+            logger.info(f"显示设置已初始化 - 字体: {font_family} {font_size}pt, 窗口: {self.width()}x{self.height()}")
+
+        except Exception as e:
+            logger.error(f"初始化显示设置失败: {e}")
+
     def _setup_auto_save(self):
         """设置自动保存功能"""
         try:
@@ -569,7 +630,25 @@ class NewMainWindow(QMainWindow):
         
         # 弹性空间
         toolbar_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum))
-        
+
+        # 快速字体调整器
+        try:
+            from src.gui.quick_font_adjuster import QuickFontAdjuster
+            self.quick_font_adjuster = QuickFontAdjuster()
+            self.quick_font_adjuster.font_size_changed.connect(self.on_font_size_changed)
+            toolbar_layout.addWidget(self.quick_font_adjuster)
+
+            # 添加分隔线
+            separator2 = QFrame()
+            separator2.setFrameShape(QFrame.VLine)
+            separator2.setFrameShadow(QFrame.Sunken)
+            separator2.setStyleSheet("QFrame { color: #E0E0E0; }")
+            toolbar_layout.addWidget(separator2)
+
+        except Exception as e:
+            logger.error(f"添加快速字体调整器失败: {e}")
+            self.quick_font_adjuster = None
+
         # 主题切换按钮
         self.theme_toggle_btn = MaterialButton("🌙", "text")
         self.theme_toggle_btn.setToolTip("切换深色/浅色主题")
@@ -636,7 +715,48 @@ class NewMainWindow(QMainWindow):
         
         # 视图菜单
         view_menu = menubar.addMenu("视图")
-        
+
+        # 字体大小子菜单
+        font_menu = view_menu.addMenu("字体大小")
+
+        # 快速字体调整选项
+        increase_font_action = QAction("增大字体", self)
+        increase_font_action.setShortcut("Ctrl++")
+        increase_font_action.triggered.connect(self.increase_font_size)
+        font_menu.addAction(increase_font_action)
+
+        decrease_font_action = QAction("减小字体", self)
+        decrease_font_action.setShortcut("Ctrl+-")
+        decrease_font_action.triggered.connect(self.decrease_font_size)
+        font_menu.addAction(decrease_font_action)
+
+        reset_font_action = QAction("重置字体", self)
+        reset_font_action.setShortcut("Ctrl+0")
+        reset_font_action.triggered.connect(self.reset_font_size)
+        font_menu.addAction(reset_font_action)
+
+        font_menu.addSeparator()
+
+        # 预设字体大小
+        from src.utils.dpi_adapter import get_dpi_adapter
+        dpi_adapter = get_dpi_adapter()
+        presets = dpi_adapter.get_font_size_presets()
+
+        for name, size in presets.items():
+            preset_action = QAction(f"{name} ({size}pt)", self)
+            preset_action.triggered.connect(lambda checked, s=size: self.set_font_size(s))
+            font_menu.addAction(preset_action)
+
+        view_menu.addSeparator()
+
+        # 显示设置
+        display_settings_action = QAction("显示设置...", self)
+        display_settings_action.setShortcut("Ctrl+D")
+        display_settings_action.triggered.connect(self.show_display_settings)
+        view_menu.addAction(display_settings_action)
+
+        view_menu.addSeparator()
+
         toggle_theme_action = QAction("切换主题", self)
         toggle_theme_action.setShortcut("Ctrl+T")
         toggle_theme_action.triggered.connect(self.toggle_theme)
@@ -3472,7 +3592,128 @@ class NewMainWindow(QMainWindow):
                 
         except Exception as e:
             logger.error(f"验证项目加载完成情况失败: {e}")
-    
+
+    # 显示设置相关方法
+    def increase_font_size(self):
+        """增大字体大小"""
+        try:
+            if hasattr(self, 'quick_font_adjuster') and self.quick_font_adjuster:
+                self.quick_font_adjuster.increase_font_size()
+            else:
+                # 如果没有快速字体调整器，直接调用DPI适配器
+                from src.utils.dpi_adapter import get_dpi_adapter
+                dpi_adapter = get_dpi_adapter()
+                current_size = dpi_adapter.current_font_size
+                new_size = min(20, current_size + 1)
+                self.set_font_size(new_size)
+        except Exception as e:
+            logger.error(f"增大字体大小失败: {e}")
+
+    def decrease_font_size(self):
+        """减小字体大小"""
+        try:
+            if hasattr(self, 'quick_font_adjuster') and self.quick_font_adjuster:
+                self.quick_font_adjuster.decrease_font_size()
+            else:
+                # 如果没有快速字体调整器，直接调用DPI适配器
+                from src.utils.dpi_adapter import get_dpi_adapter
+                dpi_adapter = get_dpi_adapter()
+                current_size = dpi_adapter.current_font_size
+                new_size = max(8, current_size - 1)
+                self.set_font_size(new_size)
+        except Exception as e:
+            logger.error(f"减小字体大小失败: {e}")
+
+    def reset_font_size(self):
+        """重置字体大小"""
+        try:
+            if hasattr(self, 'quick_font_adjuster') and self.quick_font_adjuster:
+                self.quick_font_adjuster.reset_font_size()
+            else:
+                # 如果没有快速字体调整器，直接调用DPI适配器
+                from src.utils.dpi_adapter import get_dpi_adapter
+                dpi_adapter = get_dpi_adapter()
+                default_size = dpi_adapter.get_recommended_font_size()
+                self.set_font_size(default_size)
+        except Exception as e:
+            logger.error(f"重置字体大小失败: {e}")
+
+    def set_font_size(self, size: int):
+        """设置字体大小"""
+        try:
+            from src.utils.dpi_adapter import get_dpi_adapter
+            dpi_adapter = get_dpi_adapter()
+
+            # 验证字体大小
+            size = max(8, min(20, size))
+
+            # 更新DPI适配器
+            dpi_adapter.current_font_size = size
+
+            # 创建新字体并应用到应用程序
+            font = dpi_adapter.create_scaled_font(size=size)
+            app = QApplication.instance()
+            if app:
+                app.setFont(font)
+
+            # 更新快速字体调整器（如果存在）
+            if hasattr(self, 'quick_font_adjuster') and self.quick_font_adjuster:
+                self.quick_font_adjuster.set_font_size(size)
+
+            # 保存字体设置到配置
+            if hasattr(self, 'display_config'):
+                self.display_config.set("font.size", size)
+                self.display_config.save_config()
+
+            logger.info(f"字体大小已设置为: {size}pt")
+
+        except Exception as e:
+            logger.error(f"设置字体大小失败: {e}")
+
+    def show_display_settings(self):
+        """显示显示设置对话框"""
+        try:
+            from src.gui.display_settings_dialog import DisplaySettingsDialog
+
+            dialog = DisplaySettingsDialog(self)
+
+            # 连接设置改变信号
+            dialog.settings_changed.connect(self.on_display_settings_changed)
+
+            dialog.exec_()
+
+        except Exception as e:
+            logger.error(f"显示显示设置对话框失败: {e}")
+            QMessageBox.warning(self, "错误", f"无法打开显示设置: {e}")
+
+    def on_display_settings_changed(self):
+        """显示设置改变处理"""
+        try:
+            logger.info("显示设置已改变")
+            # 这里可以添加设置改变后的处理逻辑
+            # 比如重新应用字体、刷新界面等
+
+        except Exception as e:
+            logger.error(f"处理显示设置改变失败: {e}")
+
+    def on_font_size_changed(self, size: int):
+        """字体大小改变处理"""
+        try:
+            logger.info(f"字体大小改变为: {size}pt")
+
+            # 应用字体到整个应用程序
+            from src.utils.dpi_adapter import get_dpi_adapter
+            dpi_adapter = get_dpi_adapter()
+            dpi_adapter.current_font_size = size
+
+            font = dpi_adapter.create_scaled_font(size=size)
+            app = QApplication.instance()
+            if app:
+                app.setFont(font)
+
+        except Exception as e:
+            logger.error(f"处理字体大小改变失败: {e}")
+
     def _init_consistency_processor(self):
         """初始化一致性增强图像处理器"""
         try:

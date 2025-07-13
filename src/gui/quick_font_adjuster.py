@@ -5,11 +5,12 @@
 提供快捷键和工具栏按钮来快速调整字体大小
 """
 
-from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton, 
+from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QLabel, QPushButton,
                             QSlider, QApplication, QToolBar, QAction)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QKeySequence
 from src.utils.logger import logger
+from src.utils.dpi_adapter import get_dpi_adapter
 
 
 class QuickFontAdjuster(QWidget):
@@ -19,10 +20,11 @@ class QuickFontAdjuster(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.current_font_size = 10
+        self.dpi_adapter = get_dpi_adapter()
+        self.current_font_size = self.dpi_adapter.current_font_size
         self.min_font_size = 8
-        self.max_font_size = 24
-        
+        self.max_font_size = 20  # 与DPI适配器保持一致
+
         self.setup_ui()
         self.setup_shortcuts()
         
@@ -99,7 +101,9 @@ class QuickFontAdjuster(QWidget):
         
     def reset_font_size(self):
         """重置字体大小"""
-        self.set_font_size(10)
+        default_size = self.dpi_adapter.get_recommended_font_size()
+        self.set_font_size(default_size)
+        logger.info(f"字体大小重置为推荐值: {default_size}pt")
         
     def set_font_size(self, size):
         """设置字体大小"""
@@ -123,18 +127,25 @@ class QuickFontAdjuster(QWidget):
         try:
             app = QApplication.instance()
             if app:
-                font = app.font()
-                font.setPointSize(size)
+                # 使用DPI适配器创建缩放字体
+                font = self.dpi_adapter.create_scaled_font(size=size)
                 app.setFont(font)
-                
+
+                # 更新DPI适配器的当前字体大小
+                self.dpi_adapter.current_font_size = size
+
                 # 更新所有窗口
                 for widget in app.allWidgets():
                     if widget.isWindow():
                         self.update_widget_font(widget, size)
-                        
+
         except Exception as e:
             logger.error(f"应用字体大小失败: {e}")
-            
+
+    def get_current_font_size(self) -> int:
+        """获取当前字体大小"""
+        return self.current_font_size
+
     def update_widget_font(self, widget, size):
         """递归更新控件字体"""
         try:

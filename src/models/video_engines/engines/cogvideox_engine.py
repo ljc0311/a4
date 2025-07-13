@@ -108,15 +108,9 @@ class CogVideoXEngine(VideoGenerationEngine):
                 ttl_dns_cache=300,
                 use_dns_cache=True
             )
-            timeout = aiohttp.ClientTimeout(
-                total=self.timeout,
-                connect=30,
-                sock_read=60,
-                sock_connect=30
-            )
+            # 不设置全局timeout，在每个请求中单独设置
             self.session = aiohttp.ClientSession(
                 connector=connector,
-                timeout=timeout,
                 headers={
                     'Authorization': f'Bearer {self.api_key}',
                     'Content-Type': 'application/json'
@@ -153,7 +147,9 @@ class CogVideoXEngine(VideoGenerationEngine):
                 "prompt": "test"
             }
 
-            async with self.session.post(test_url, json=test_data) as response:
+            # 创建测试连接的timeout
+            timeout = aiohttp.ClientTimeout(total=30)  # 30秒超时
+            async with self.session.post(test_url, json=test_data, timeout=timeout) as response:
                 # 如果返回401，说明API密钥问题
                 # 如果返回400，可能是参数问题，但端点是对的
                 # 如果返回200或202，说明连接正常
@@ -277,15 +273,9 @@ class CogVideoXEngine(VideoGenerationEngine):
                     ttl_dns_cache=300,
                     use_dns_cache=True
                 )
-                timeout = aiohttp.ClientTimeout(
-                    total=self.timeout,
-                    connect=30,
-                    sock_read=60,
-                    sock_connect=30
-                )
+                # 不设置全局timeout，在每个请求中单独设置
                 self.session = aiohttp.ClientSession(
                     connector=connector,
-                    timeout=timeout,
                     headers={
                         'Authorization': f'Bearer {self.api_key}',
                         'Content-Type': 'application/json'
@@ -313,15 +303,9 @@ class CogVideoXEngine(VideoGenerationEngine):
                 ttl_dns_cache=300,
                 use_dns_cache=True
             )
-            timeout = aiohttp.ClientTimeout(
-                total=self.timeout,
-                connect=30,
-                sock_read=60,
-                sock_connect=30
-            )
+            # 不设置全局timeout，在每个请求中单独设置
             self.session = aiohttp.ClientSession(
                 connector=connector,
-                timeout=timeout,
                 headers={
                     'Authorization': f'Bearer {self.api_key}',
                     'Content-Type': 'application/json'
@@ -625,7 +609,9 @@ class CogVideoXEngine(VideoGenerationEngine):
         logger.debug(f"发送给CogVideoX API的参数: {request_data}")
 
         try:
-            async with self.session.post(url, json=request_data) as response:
+            # 创建提交任务的timeout
+            timeout = aiohttp.ClientTimeout(total=60)  # 60秒超时
+            async with self.session.post(url, json=request_data, timeout=timeout) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     raise Exception(f"API请求失败 (状态码: {response.status}): {error_text}")
@@ -674,8 +660,9 @@ class CogVideoXEngine(VideoGenerationEngine):
                     logger.warning("HTTP会话已关闭，停止轮询任务状态")
                     raise asyncio.CancelledError("HTTP会话已关闭")
 
-                # 使用会话的默认超时设置，避免超时管理器冲突
-                async with self.session.get(url) as response:
+                # 创建轮询状态的timeout
+                timeout = aiohttp.ClientTimeout(total=30)  # 30秒超时
+                async with self.session.get(url, timeout=timeout) as response:
                     if response.status != 200:
                         error_text = await response.text()
                         consecutive_errors += 1
@@ -804,7 +791,8 @@ class CogVideoXEngine(VideoGenerationEngine):
             counter += 1
 
         # 下载视频
-        async with self.session.get(video_url) as response:
+        timeout = aiohttp.ClientTimeout(total=300)  # 5分钟超时
+        async with self.session.get(video_url, timeout=timeout) as response:
             if response.status != 200:
                 raise Exception(f"下载视频失败 (状态码: {response.status})")
 

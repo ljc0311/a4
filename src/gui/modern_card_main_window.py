@@ -244,7 +244,10 @@ class ModernCardMainWindow(QMainWindow):
         
         # 当前选中的页面
         self.current_page = None
-        
+
+        # 初始化显示设置
+        self.init_display_settings()
+
         # 设置窗口
         self.setup_window()
         self.setup_ui()
@@ -2143,6 +2146,65 @@ class ModernCardMainWindow(QMainWindow):
         return provider_map.get(selected_model, "tongyi")
 
 
+
+
+    def init_display_settings(self):
+        """初始化显示设置"""
+        try:
+            # 初始化显示配置
+            from src.utils.display_config import get_display_config
+            self.display_config = get_display_config()
+
+            # 初始化DPI适配器
+            from src.utils.dpi_adapter import get_dpi_adapter
+            self.dpi_adapter = get_dpi_adapter()
+
+            # 应用保存的字体设置
+            font_config = self.display_config.get_font_config()
+            if font_config.get("auto_size", True):
+                # 使用DPI适配器的推荐字体大小
+                font_size = self.dpi_adapter.get_recommended_font_size()
+            else:
+                # 使用保存的字体大小
+                font_size = font_config.get("size", 10)
+
+            font_family = font_config.get("family", "Microsoft YaHei UI")
+
+            # 更新DPI适配器设置
+            self.dpi_adapter.font_family = font_family
+            self.dpi_adapter.current_font_size = font_size
+
+            # 应用DPI设置
+            dpi_config = self.display_config.get_dpi_config()
+            if dpi_config.get("auto_scaling", True):
+                self.dpi_adapter.set_auto_dpi_scaling(True)
+            else:
+                custom_factor = dpi_config.get("custom_scale_factor", 1.0)
+                self.dpi_adapter.set_custom_scale_factor(custom_factor)
+                self.dpi_adapter.set_auto_dpi_scaling(False)
+
+            # 应用字体到应用程序
+            font = self.dpi_adapter.create_scaled_font(family=font_family, size=font_size)
+            app = QApplication.instance()
+            if app:
+                app.setFont(font)
+
+            # 应用窗口设置
+            window_config = self.display_config.get_window_config()
+            if window_config.get("auto_resize", True):
+                # 使用自适应窗口大小
+                width, height = self.dpi_adapter.get_adaptive_window_size()
+                self.resize(width, height)
+            else:
+                # 使用保存的窗口大小
+                width = window_config.get("default_width", 1400)
+                height = window_config.get("default_height", 900)
+                self.resize(width, height)
+
+            logger.info(f"显示设置已初始化 - 字体: {font_family} {font_size}pt, 窗口: {self.width()}x{self.height()}")
+
+        except Exception as e:
+            logger.error(f"初始化显示设置失败: {e}")
 
 
 # 测试代码

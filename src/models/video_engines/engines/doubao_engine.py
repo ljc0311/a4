@@ -53,7 +53,6 @@ class DoubaoEngine(VideoGenerationEngine):
         self.max_concurrent_tasks = self.config.get('max_concurrent', 10)
         self.rpm_limit = config.get('rpm_limit', 600)
         self.fps = config.get('fps', 24)
-        self.free_quota_tokens = config.get('free_quota_tokens', 2000000)
         self.cost_per_million_tokens = config.get('cost_per_million_tokens', 15.0)
         self.estimated_tokens_per_second = config.get('estimated_tokens_per_second', 50000)
         self.current_tasks = 0
@@ -72,7 +71,7 @@ class DoubaoEngine(VideoGenerationEngine):
 
         logger.info(f"豆包视频引擎初始化完成，模型: {self.model}")
         logger.info(f"豆包引擎配置 - 并发: {self.max_concurrent_tasks}, RPM限制: {self.rpm_limit}, 帧率: {self.fps}fps")
-        logger.info(f"豆包计费 - 免费额度: {self.free_quota_tokens}token, 收费: {self.cost_per_million_tokens}元/百万token")
+        logger.info(f"豆包计费 - 收费: {self.cost_per_million_tokens}元/百万token")
 
 
 
@@ -86,24 +85,7 @@ class DoubaoEngine(VideoGenerationEngine):
                 return False
             
             # 创建HTTP会话
-            connector = aiohttp.TCPConnector(
-                limit=10,
-                limit_per_host=5,
-                ttl_dns_cache=300,
-                use_dns_cache=True,
-                keepalive_timeout=30,
-                enable_cleanup_closed=True
-            )
-            
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            self.session = aiohttp.ClientSession(
-                connector=connector,
-                timeout=timeout,
-                headers={
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/json'
-                }
-            )
+            await self._create_new_session()
             
             # 测试连接
             if await self.test_connection():
@@ -145,7 +127,9 @@ class DoubaoEngine(VideoGenerationEngine):
                 ]
             }
 
-            async with self.session.post(url, json=test_data, headers=self.headers) as response:
+            # 创建测试连接的timeout
+            timeout = aiohttp.ClientTimeout(total=30)  # 30秒超时
+            async with self.session.post(url, json=test_data, headers=self.headers, timeout=timeout) as response:
                 if response.status == 200:
                     logger.info("豆包API连接测试成功")
                     return True
@@ -220,8 +204,48 @@ class DoubaoEngine(VideoGenerationEngine):
     
     async def _ensure_session_valid(self):
         """确保HTTP会话有效"""
-        if not self.session or self.session.closed:
-            await self.initialize()
+        try:
+            # 总是重新创建session以避免事件循环冲突
+            if self.session and not self.session.closed:
+                try:
+                    await self.session.close()
+                except Exception as e:
+                    logger.debug(f"关闭旧session时出错: {e}")
+
+            # 创建新session
+            await self._create_new_session()
+            logger.debug("豆包引擎: HTTP会话已重新创建")
+
+        except Exception as e:
+            logger.warning(f"确保session有效性失败: {e}")
+            await self._create_new_session()
+
+    async def _create_new_session(self):
+        """创建新的HTTP会话"""
+        try:
+            # 创建连接器
+            connector = aiohttp.TCPConnector(
+                limit=100,
+                limit_per_host=30,
+                ttl_dns_cache=300,
+                use_dns_cache=True,
+                keepalive_timeout=30,
+                enable_cleanup_closed=True
+            )
+
+            # 不设置全局timeout，在每个请求中单独设置
+            self.session = aiohttp.ClientSession(
+                connector=connector,
+                headers={
+                    'Authorization': f'Bearer {self.api_key}',
+                    'Content-Type': 'application/json'
+                }
+            )
+            logger.debug("豆包引擎: HTTP会话创建成功")
+
+        except Exception as e:
+            logger.error(f"创建HTTP会话失败: {e}")
+            raise
     
     def _encode_image_to_base64(self, image_path: str) -> str:
         """将图像编码为base64"""
@@ -233,12 +257,122 @@ class DoubaoEngine(VideoGenerationEngine):
         except Exception as e:
             logger.error(f"图像编码失败: {e}")
             raise
+
+    def _validate_image(self, image_path: str) -> bool:
+        """验证图片是否符合豆包API要求"""
+        try:
+            from PIL import Image
+
+            # 检查文件大小 (小于30MB)
+            file_size = os.path.getsize(image_path)
+            if file_size > 30 * 1024 * 1024:  # 30MB
+                logger.error(f"豆包引擎: 图片文件过大 ({file_size / 1024 / 1024:.1f}MB > 30MB): {image_path}")
+                return False
+
+            # 检查图片格式和尺寸
+            with Image.open(image_path) as img:
+                # 检查格式
+                format_lower = img.format.lower() if img.format else ''
+                supported_formats = ['jpeg', 'jpg', 'png', 'webp', 'bmp', 'tiff', 'gif']
+                if format_lower not in supported_formats:
+                    logger.error(f"豆包引擎: 不支持的图片格式 ({img.format}): {image_path}")
+                    return False
+
+                # 检查尺寸
+                width, height = img.size
+
+                # 宽高长度：(300, 6000)
+                if width < 300 or width > 6000 or height < 300 or height > 6000:
+                    logger.error(f"豆包引擎: 图片尺寸不符合要求 ({width}x{height}，要求300-6000px): {image_path}")
+                    return False
+
+                # 宽高比：(0.4, 2.5)
+                aspect_ratio = width / height
+                if aspect_ratio <= 0.4 or aspect_ratio >= 2.5:
+                    logger.error(f"豆包引擎: 图片宽高比不符合要求 ({aspect_ratio:.2f}，要求0.4-2.5): {image_path}")
+                    return False
+
+                logger.info(f"豆包引擎: 图片验证通过 - 格式:{img.format}, 尺寸:{width}x{height}, 宽高比:{aspect_ratio:.2f}, 大小:{file_size/1024:.1f}KB")
+                return True
+
+        except Exception as e:
+            logger.error(f"豆包引擎: 图片验证失败: {e}")
+            return False
+
+    def _get_image_format(self, image_path: str) -> str:
+        """获取图片格式（小写）"""
+        try:
+            from PIL import Image
+            with Image.open(image_path) as img:
+                format_name = img.format.lower() if img.format else 'jpeg'
+                # 统一JPEG格式名称
+                if format_name == 'jpg':
+                    format_name = 'jpeg'
+                return format_name
+        except Exception as e:
+            logger.error(f"获取图片格式失败: {e}")
+            # 根据文件扩展名推断
+            ext = os.path.splitext(image_path)[1].lower()
+            format_map = {
+                '.jpg': 'jpeg',
+                '.jpeg': 'jpeg',
+                '.png': 'png',
+                '.webp': 'webp',
+                '.bmp': 'bmp',
+                '.tiff': 'tiff',
+                '.gif': 'gif'
+            }
+            return format_map.get(ext, 'jpeg')
+
+    def _prepare_image_url(self, image_path: str) -> Optional[str]:
+        """准备图片URL - 支持网络URL和本地文件(转Base64)"""
+        try:
+            # 如果已经是URL，直接返回
+            if image_path.startswith(('http://', 'https://')):
+                logger.info(f"豆包引擎: 使用网络图片URL: {image_path}")
+                return image_path
+
+            # 如果已经是Base64格式，直接返回
+            if image_path.startswith('data:image/'):
+                logger.info(f"豆包引擎: 使用Base64图片数据")
+                return image_path
+
+            # 本地文件，转换为Base64格式
+            if not os.path.exists(image_path):
+                logger.error(f"豆包引擎: 图片文件不存在: {image_path}")
+                return None
+
+            # 验证图片格式和大小
+            if not self._validate_image(image_path):
+                return None
+
+            # 转换为Base64
+            base64_data = self._encode_image_to_base64(image_path)
+            if base64_data:
+                # 获取图片格式
+                image_format = self._get_image_format(image_path)
+                data_url = f"data:image/{image_format};base64,{base64_data}"
+                logger.info(f"豆包引擎: 本地图片转换为Base64成功: {os.path.basename(image_path)} (格式:{image_format}, 大小:{len(data_url)}字符)")
+                return data_url
+            else:
+                logger.error(f"豆包引擎: 图片Base64编码失败: {image_path}")
+                return None
+
+        except Exception as e:
+            logger.error(f"豆包引擎: 准备图片URL失败: {e}")
+            return None
     
     def _prepare_request_data(self, config: VideoGenerationConfig) -> Dict:
         """准备请求数据 - 根据豆包视频生成API文档格式"""
         try:
-            # 确定视频时长（豆包支持5秒和10秒）
-            duration = 5 if config.duration <= 5 else 10
+            # 豆包只支持5秒和10秒，使用用户指定的时长（必须是5或10）
+            if config.duration not in [5, 10]:
+                logger.warning(f"豆包引擎只支持5秒或10秒，用户指定: {config.duration}秒，将使用最接近的时长")
+                duration = 5 if config.duration <= 7.5 else 10
+            else:
+                duration = int(config.duration)
+
+            logger.info(f"豆包视频时长设置: 用户指定{config.duration}秒 → 实际使用{duration}秒")
 
             # 确定分辨率和宽高比
             resolution = self._determine_resolution(config.width, config.height)
@@ -249,23 +383,24 @@ class DoubaoEngine(VideoGenerationEngine):
 
             # 如果有输入图像，添加到content中
             if config.input_image_path:
-                if config.input_image_path.startswith(('http://', 'https://')):
-                    # 使用URL格式的图片（豆包推荐格式）
+                image_url = self._prepare_image_url(config.input_image_path)
+                if image_url:
                     content.append({
                         "type": "image_url",
                         "image_url": {
-                            "url": config.input_image_path
+                            "url": image_url
                         }
                     })
-                elif os.path.exists(config.input_image_path):
-                    # 本地图片文件，编码为base64（可能不被支持）
-                    image_base64 = self._encode_image_to_base64(config.input_image_path)
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        }
-                    })
+                    # 简化日志显示
+                    if image_url.startswith('data:image/'):
+                        format_part = image_url.split(';')[0].split('/')[-1]
+                        data_length = len(image_url)
+                        logger.info(f"豆包图生视频: 使用Base64图片 (格式:{format_part}, 大小:{data_length}字符)")
+                    else:
+                        logger.info(f"豆包图生视频: 使用网络图片 {image_url}")
+                else:
+                    logger.error(f"无法处理图片文件: {config.input_image_path}")
+                    raise Exception(f"无法处理图片文件，请检查文件路径或网络连接: {config.input_image_path}")
 
             # 如果有文本提示词，添加到content中
             if config.input_prompt:
@@ -347,21 +482,13 @@ class DoubaoEngine(VideoGenerationEngine):
         """估算视频生成成本"""
         estimated_tokens = int(duration * self.estimated_tokens_per_second)
 
-        # 计算成本
-        if estimated_tokens <= self.free_quota_tokens:
-            cost_yuan = 0.0
-            is_free = True
-        else:
-            billable_tokens = estimated_tokens - self.free_quota_tokens
-            cost_yuan = (billable_tokens / 1000000) * self.cost_per_million_tokens
-            is_free = False
+        # 计算成本（移除免费额度概念，直接按token计费）
+        cost_yuan = (estimated_tokens / 1000000) * self.cost_per_million_tokens
 
         return {
             'estimated_tokens': estimated_tokens,
             'cost_yuan': cost_yuan,
             'cost_usd': cost_yuan / 7.2,  # 估算美元价格
-            'is_free': is_free,
-            'free_quota_remaining': max(0, self.free_quota_tokens - estimated_tokens)
         }
     
     async def _submit_generation_task(self, request_data: Dict) -> str:
@@ -370,7 +497,9 @@ class DoubaoEngine(VideoGenerationEngine):
             # 豆包视频生成API的正确端点（根据官方文档）
             url = f"{self.base_url}/contents/generations/tasks"
 
-            async with self.session.post(url, json=request_data, headers=self.headers) as response:
+            # 创建请求特定的timeout
+            timeout = aiohttp.ClientTimeout(total=60)  # 60秒超时
+            async with self.session.post(url, json=request_data, headers=self.headers, timeout=timeout) as response:
                 if response.status == 200:
                     result = await response.json()
                     # 根据豆包API文档，返回的是任务ID
@@ -400,7 +529,9 @@ class DoubaoEngine(VideoGenerationEngine):
                 if time.time() - start_time > self.timeout:
                     raise Exception("任务超时")
 
-                async with self.session.get(url, headers=self.headers) as response:
+                # 创建请求特定的timeout
+                timeout = aiohttp.ClientTimeout(total=30)  # 30秒超时
+                async with self.session.get(url, headers=self.headers, timeout=timeout) as response:
                     if response.status == 200:
                         result = await response.json()
                         status = result.get('status')
@@ -462,7 +593,9 @@ class DoubaoEngine(VideoGenerationEngine):
     async def _download_video(self, video_url: str, output_path: str) -> str:
         """下载生成的视频"""
         try:
-            async with self.session.get(video_url) as response:
+            # 创建下载特定的timeout（更长时间用于下载大文件）
+            timeout = aiohttp.ClientTimeout(total=300)  # 5分钟超时
+            async with self.session.get(video_url, timeout=timeout) as response:
                 if response.status == 200:
                     # 确保输出目录存在
                     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -514,10 +647,6 @@ class DoubaoEngine(VideoGenerationEngine):
             cost_info = self.estimate_cost(config.duration)
             logger.info(f"豆包视频生成开始，时长: {config.duration}秒")
             logger.info(f"预估成本: {cost_info['cost_yuan']:.4f}元 ({cost_info['estimated_tokens']}token)")
-            if cost_info['is_free']:
-                logger.info("✅ 在免费额度内")
-            else:
-                logger.warning(f"⚠️ 将产生费用: {cost_info['cost_yuan']:.4f}元")
 
             if progress_callback:
                 progress_callback(f"开始豆包视频生成... (预估: {cost_info['cost_yuan']:.4f}元)")
@@ -624,12 +753,32 @@ class DoubaoEngine(VideoGenerationEngine):
     def __del__(self):
         """析构函数"""
         if hasattr(self, 'session') and self.session and not self.session.closed:
-            # 在事件循环中关闭会话
+            # 安全地关闭会话，避免事件循环问题
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self.session.close())
-                else:
-                    loop.run_until_complete(self.session.close())
+                # 检查是否有运行中的事件循环
+                try:
+                    loop = asyncio.get_running_loop()
+                    # 如果有运行中的循环，创建任务关闭session
+                    if loop and not loop.is_closed():
+                        loop.create_task(self._safe_close_session())
+                except RuntimeError:
+                    # 没有运行中的事件循环，尝试创建新的循环
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(self.session.close())
+                        loop.close()
+                    except Exception:
+                        # 如果所有方法都失败，直接忽略
+                        pass
             except Exception:
+                # 忽略所有析构函数中的异常
                 pass
+
+    async def _safe_close_session(self):
+        """安全关闭session"""
+        try:
+            if self.session and not self.session.closed:
+                await self.session.close()
+        except Exception:
+            pass

@@ -51,7 +51,11 @@ class VideoGenerationSettingsWidget(QWidget):
 
         # 豆包视频生成设置标签页
         self.doubao_tab = self.create_doubao_tab()
-        self.engine_tabs.addTab(self.doubao_tab, "🎭 豆包视频生成")
+        self.engine_tabs.addTab(self.doubao_tab, "🎭 豆包视频生成 Pro版")
+
+        # 豆包Lite视频生成设置标签页
+        self.doubao_lite_tab = self.create_doubao_lite_tab()
+        self.engine_tabs.addTab(self.doubao_lite_tab, "💰 豆包视频生成 Lite版")
 
         # 其他引擎设置标签页（预留）
         self.other_engines_tab = self.create_other_engines_tab()
@@ -247,9 +251,9 @@ class VideoGenerationSettingsWidget(QWidget):
 
         # 并发任务数
         self.doubao_max_concurrent = QSpinBox()
-        self.doubao_max_concurrent.setRange(1, 5)
+        self.doubao_max_concurrent.setRange(1, 10)  # Pro版最多10并发
         self.doubao_max_concurrent.setValue(2)
-        self.doubao_max_concurrent.setToolTip("同时进行的视频生成任务数量")
+        self.doubao_max_concurrent.setToolTip("同时进行的视频生成任务数量（Pro版最多10个）")
         params_form.addRow("并发任务数:", self.doubao_max_concurrent)
 
         params_group.setLayout(params_form)
@@ -302,6 +306,102 @@ class VideoGenerationSettingsWidget(QWidget):
 
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
+
+        layout.addStretch()
+        return tab
+
+    def create_doubao_lite_tab(self):
+        """创建豆包Lite视频生成设置标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # 标题和说明
+        title_label = QLabel("💰 豆包Lite视频生成引擎设置")
+        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        layout.addWidget(title_label)
+
+        # 成本优势说明
+        cost_info = QLabel("💡 豆包Lite版比Pro版便宜33%，功能完全相同，推荐使用！")
+        cost_info.setStyleSheet("color: #2E8B57; font-weight: bold; padding: 8px; background-color: #F0FFF0; border-radius: 4px;")
+        layout.addWidget(cost_info)
+
+        # API配置组
+        api_group = QGroupBox("API配置")
+        api_form = QFormLayout()
+
+        # API密钥（与Pro版共享）
+        self.doubao_lite_api_key = QLineEdit()
+        self.doubao_lite_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.doubao_lite_api_key.setPlaceholderText("与Pro版共享相同的API密钥")
+        api_form.addRow("API密钥:", self.doubao_lite_api_key)
+
+        # 模型配置
+        self.doubao_lite_model = QLineEdit()
+        self.doubao_lite_model.setText("doubao-seedance-1-0-lite-i2v-250428")
+        self.doubao_lite_model.setReadOnly(True)
+        api_form.addRow("模型名称:", self.doubao_lite_model)
+
+        api_group.setLayout(api_form)
+        layout.addWidget(api_group)
+
+        # 性能配置组
+        perf_group = QGroupBox("性能配置")
+        perf_form = QFormLayout()
+
+        # 并发数
+        self.doubao_lite_concurrent = QSpinBox()
+        self.doubao_lite_concurrent.setRange(1, 5)  # Lite版最多5并发
+        self.doubao_lite_concurrent.setValue(5)
+        self.doubao_lite_concurrent.setToolTip("豆包Lite版最多支持5个并发任务")
+        perf_form.addRow("最大并发数:", self.doubao_lite_concurrent)
+
+        # 超时设置
+        self.doubao_lite_timeout = QSpinBox()
+        self.doubao_lite_timeout.setRange(60, 600)
+        self.doubao_lite_timeout.setValue(300)
+        self.doubao_lite_timeout.setSuffix(" 秒")
+        perf_form.addRow("请求超时:", self.doubao_lite_timeout)
+
+        perf_group.setLayout(perf_form)
+        layout.addWidget(perf_group)
+
+        # 成本配置组
+        cost_group = QGroupBox("成本配置")
+        cost_form = QFormLayout()
+
+        # 成本显示
+        cost_label = QLabel("10元/百万token (比Pro版便宜33%)")
+        cost_label.setStyleSheet("color: #2E8B57; font-weight: bold;")
+        cost_form.addRow("计费标准:", cost_label)
+
+        # 支持的分辨率
+        resolution_label = QLabel("480p, 720p, 1080p (比Pro版支持更多)")
+        resolution_label.setStyleSheet("color: #2E8B57;")
+        cost_form.addRow("支持分辨率:", resolution_label)
+
+        cost_group.setLayout(cost_form)
+        layout.addWidget(cost_group)
+
+        # 使用说明
+        usage_group = QGroupBox("使用说明")
+        usage_layout = QVBoxLayout()
+
+        usage_text = QTextEdit()
+        usage_text.setMaximumHeight(120)
+        usage_text.setPlainText(
+            "豆包Lite版特点：\n"
+            "• 成本优势：比Pro版便宜33%\n"
+            "• 功能相同：支持文生视频和图生视频\n"
+            "• 分辨率更多：支持480p, 720p, 1080p\n"
+            "• 图片要求：仅支持HTTP/HTTPS URL格式\n"
+            "• 时长支持：5秒和10秒\n"
+            "• 推荐场景：大量视频生成、成本敏感项目"
+        )
+        usage_text.setReadOnly(True)
+        usage_layout.addWidget(usage_text)
+
+        usage_group.setLayout(usage_layout)
+        layout.addWidget(usage_group)
 
         layout.addStretch()
         return tab
@@ -448,7 +548,7 @@ class VideoGenerationSettingsWidget(QWidget):
             self.cogvideox_max_retries.setValue(cogvideox_config.get('max_retries', 3))
             self.cogvideox_max_duration.setValue(cogvideox_config.get('max_duration', 10.0))
 
-            # 加载豆包设置
+            # 加载豆包Pro设置
             doubao_config = config.get('engines', {}).get('doubao_seedance_pro', {})
 
             self.doubao_enabled.setChecked(doubao_config.get('enabled', False))
@@ -458,6 +558,15 @@ class VideoGenerationSettingsWidget(QWidget):
             self.doubao_max_retries.setValue(doubao_config.get('max_retries', 3))
             self.doubao_max_duration.setValue(doubao_config.get('max_duration', 4.0))
             self.doubao_max_concurrent.setValue(doubao_config.get('max_concurrent', 2))
+
+            # 加载豆包Lite设置
+            doubao_lite_config = config.get('engines', {}).get('doubao_seedance_lite', {})
+
+            self.doubao_lite_enabled.setChecked(doubao_lite_config.get('enabled', False))
+            self.doubao_lite_api_key.setText(doubao_lite_config.get('api_key', ''))
+            self.doubao_lite_base_url.setText(doubao_lite_config.get('base_url', 'https://ark.cn-beijing.volces.com/api/v3'))
+            self.doubao_lite_timeout.setValue(doubao_lite_config.get('timeout', 300))
+            self.doubao_lite_concurrent.setValue(doubao_lite_config.get('max_concurrent', 5))
 
             # 加载全局设置
             self.routing_strategy.setCurrentText(f"{config.get('routing_strategy', 'free_first')} - 优先免费引擎")
@@ -513,6 +622,21 @@ class VideoGenerationSettingsWidget(QWidget):
                         ],
                         'supported_fps': [16],
                         'cost_per_second': 0.02
+                    },
+                    'doubao_seedance_lite': {
+                        'enabled': self.doubao_lite_enabled.isChecked(),
+                        'api_key': self.doubao_lite_api_key.text().strip(),
+                        'base_url': self.doubao_lite_base_url.text().strip() or 'https://ark.cn-beijing.volces.com/api/v3',
+                        'model': 'doubao-seedance-1-0-lite-i2v-250428',
+                        'timeout': self.doubao_lite_timeout.value(),
+                        'max_retries': 3,
+                        'max_duration': 10.0,
+                        'max_concurrent': self.doubao_lite_concurrent.value(),
+                        'supported_resolutions': [
+                            '480p', '720p', '1080p'
+                        ],
+                        'supported_fps': [24],
+                        'cost_per_second': 0.013
                     }
                 }
             }

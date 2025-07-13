@@ -7,12 +7,14 @@
 
 import json
 import os
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QSlider, QSpinBox, QCheckBox, QPushButton,
-                            QGroupBox, QComboBox, QMessageBox, QApplication)
+                            QGroupBox, QComboBox, QMessageBox, QApplication,
+                            QFormLayout, QTabWidget, QWidget, QTextEdit)
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QFontDatabase
 from src.utils.logger import logger
+from src.utils.dpi_adapter import get_dpi_adapter
 
 
 class DisplaySettingsDialog(QDialog):
@@ -24,39 +26,71 @@ class DisplaySettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("显示设置")
         self.setModal(True)
-        self.resize(400, 500)
-        
+        self.resize(500, 600)
+
+        # DPI适配器
+        self.dpi_adapter = get_dpi_adapter()
+
         # 当前设置
         self.current_settings = self.load_settings()
-        
+
         self.setup_ui()
         self.load_current_settings()
+        self.connect_signals()
         
     def setup_ui(self):
-        """设置界面"""
+        """设置界面 - 增强版"""
         layout = QVBoxLayout(self)
-        
-        # 字体设置组
-        font_group = QGroupBox("字体设置")
-        font_layout = QVBoxLayout(font_group)
-        
-        # 字体大小
-        font_size_layout = QHBoxLayout()
-        font_size_layout.addWidget(QLabel("字体大小:"))
-        
+        layout.setSpacing(10)
+
+        # 创建标签页
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # 字体设置标签页
+        font_tab = self.create_font_tab()
+        self.tab_widget.addTab(font_tab, "字体设置")
+
+        # DPI缩放标签页
+        dpi_tab = self.create_dpi_tab()
+        self.tab_widget.addTab(dpi_tab, "DPI缩放")
+
+        # 窗口设置标签页
+        window_tab = self.create_window_tab()
+        self.tab_widget.addTab(window_tab, "窗口设置")
+
+        # 预览区域
+        self.create_preview_area(layout)
+
+        # 按钮区域
+        self.create_button_area(layout)
+
+    def create_font_tab(self):
+        """创建字体设置标签页"""
+        font_widget = QWidget()
+        layout = QVBoxLayout(font_widget)
+
+        # 字体大小设置组
+        font_size_group = QGroupBox("字体大小")
+        font_size_layout = QFormLayout(font_size_group)
+
+        # 字体大小滑块和数值
+        font_size_control_layout = QHBoxLayout()
+
         self.font_size_slider = QSlider(Qt.Horizontal)
         self.font_size_slider.setRange(8, 20)
-        self.font_size_slider.setValue(10)
+        self.font_size_slider.setValue(self.dpi_adapter.current_font_size)
         self.font_size_slider.valueChanged.connect(self.on_font_size_changed)
-        
+
         self.font_size_spinbox = QSpinBox()
         self.font_size_spinbox.setRange(8, 20)
-        self.font_size_spinbox.setValue(10)
+        self.font_size_spinbox.setValue(self.dpi_adapter.current_font_size)
         self.font_size_spinbox.valueChanged.connect(self.on_font_size_spinbox_changed)
         
-        font_size_layout.addWidget(self.font_size_slider)
-        font_size_layout.addWidget(self.font_size_spinbox)
-        font_layout.addLayout(font_size_layout)
+        font_size_control_layout.addWidget(self.font_size_slider)
+        font_size_control_layout.addWidget(self.font_size_spinbox)
+
+        font_size_layout.addRow("字体大小:", font_size_control_layout)
         
         # 字体族
         font_family_layout = QHBoxLayout()
@@ -74,10 +108,17 @@ class DisplaySettingsDialog(QDialog):
         self.font_family_combo.currentTextChanged.connect(self.on_font_family_changed)
         
         font_family_layout.addWidget(self.font_family_combo)
-        font_layout.addLayout(font_family_layout)
-        
-        layout.addWidget(font_group)
-        
+        font_size_layout.addRow("字体族:", font_family_layout)
+
+        layout.addWidget(font_size_group)
+
+        return font_widget
+
+    def create_dpi_tab(self):
+        """创建DPI缩放标签页"""
+        dpi_widget = QWidget()
+        layout = QVBoxLayout(dpi_widget)
+
         # DPI缩放设置组
         dpi_group = QGroupBox("DPI缩放设置")
         dpi_layout = QVBoxLayout(dpi_group)
@@ -105,7 +146,14 @@ class DisplaySettingsDialog(QDialog):
         dpi_layout.addLayout(scale_layout)
         
         layout.addWidget(dpi_group)
-        
+
+        return dpi_widget
+
+    def create_window_tab(self):
+        """创建窗口设置标签页"""
+        window_widget = QWidget()
+        layout = QVBoxLayout(window_widget)
+
         # 窗口设置组
         window_group = QGroupBox("窗口设置")
         window_layout = QVBoxLayout(window_group)
@@ -116,17 +164,23 @@ class DisplaySettingsDialog(QDialog):
         window_layout.addWidget(self.auto_resize_checkbox)
         
         layout.addWidget(window_group)
-        
-        # 预览区域
+
+        return window_widget
+
+    def create_preview_area(self, parent_layout):
+        """创建预览区域"""
         preview_group = QGroupBox("预览")
         preview_layout = QVBoxLayout(preview_group)
-        
-        self.preview_label = QLabel("这是预览文本 - This is preview text")
-        self.preview_label.setStyleSheet("border: 1px solid gray; padding: 10px;")
+
+        self.preview_label = QLabel("这是预览文本 - This is preview text\n字体大小和样式预览")
+        self.preview_label.setStyleSheet("border: 1px solid gray; padding: 10px; min-height: 60px;")
+        self.preview_label.setWordWrap(True)
         preview_layout.addWidget(self.preview_label)
-        
-        layout.addWidget(preview_group)
-        
+
+        parent_layout.addWidget(preview_group)
+
+    def create_button_area(self, parent_layout):
+        """创建按钮区域"""
         # 按钮
         button_layout = QHBoxLayout()
         
@@ -147,9 +201,14 @@ class DisplaySettingsDialog(QDialog):
         button_layout.addStretch()
         button_layout.addWidget(self.ok_button)
         button_layout.addWidget(self.cancel_button)
-        
-        layout.addLayout(button_layout)
-        
+
+        parent_layout.addLayout(button_layout)
+
+    def connect_signals(self):
+        """连接信号"""
+        # 信号连接已在控件创建时完成
+        pass
+
     def load_settings(self):
         """加载设置"""
         try:

@@ -87,12 +87,13 @@ class VideoEngineManager:
         # 引擎优先级（数字越小优先级越高）
         self.engine_priorities = {
             VideoEngineType.COGVIDEOX_FLASH: 1,  # 免费，优先级最高
-            VideoEngineType.DOUBAO_SEEDANCE_PRO: 2,  # 豆包，高质量付费引擎
-            VideoEngineType.PIXVERSE: 3,
-            VideoEngineType.REPLICATE_SVD: 4,
-            VideoEngineType.HAIPER: 5,
-            VideoEngineType.RUNWAY_ML: 6,
-            VideoEngineType.PIKA_LABS: 7
+            VideoEngineType.DOUBAO_SEEDANCE_PRO: 2,  # 豆包Pro，高质量付费引擎
+            VideoEngineType.DOUBAO_SEEDANCE_LITE: 3,  # 豆包Lite，经济型付费引擎
+            VideoEngineType.PIXVERSE: 4,
+            VideoEngineType.REPLICATE_SVD: 5,
+            VideoEngineType.HAIPER: 6,
+            VideoEngineType.RUNWAY_ML: 7,
+            VideoEngineType.PIKA_LABS: 8
         }
         
         VideoEngineManager._initialized = True

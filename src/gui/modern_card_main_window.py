@@ -329,7 +329,8 @@ class ModernCardMainWindow(QMainWindow):
             ("composition", "🎬 视频合成"),
             ("consistency", "🎨 一致性控制"),
             ("project", "📁 项目管理"),
-            ("settings", "⚙️ 系统设置")
+            ("settings", "⚙️ 系统设置"),
+            ("publish", "🚀 一键发布")
         ]
 
         for page_id, text in nav_items:
@@ -486,6 +487,23 @@ class ModernCardMainWindow(QMainWindow):
                 placeholder_layout.addWidget(placeholder_label)
                 self.pages["composition"] = placeholder_widget
                 self.content_stack.addWidget(self.pages["composition"])
+
+        # 一键发布页面
+        try:
+            from .simple_one_click_publish_tab import SimpleOneClickPublishTab
+            self.pages["publish"] = SimpleOneClickPublishTab(self)
+            self.content_stack.addWidget(self.pages["publish"])
+            logger.info("一键发布页面创建成功")
+        except Exception as e:
+            logger.error(f"一键发布页面创建失败: {e}")
+            # 创建占位符页面
+            placeholder_widget = QWidget()
+            placeholder_layout = QVBoxLayout(placeholder_widget)
+            placeholder_label = QLabel(f"🚀 一键发布功能暂时不可用\n错误: {e}")
+            placeholder_label.setAlignment(Qt.AlignCenter)
+            placeholder_layout.addWidget(placeholder_label)
+            self.pages["publish"] = placeholder_widget
+            self.content_stack.addWidget(self.pages["publish"])
 
         # 一致性控制页面
         self.pages["consistency"] = ConsistencyControlPanel(None, self.project_manager, self)
@@ -1598,6 +1616,9 @@ class ModernCardMainWindow(QMainWindow):
     def load_five_stage_data(self, project_config):
         """加载五阶段分镜数据"""
         try:
+            # 同步项目管理器数据
+            self.sync_project_managers()
+
             # 直接调用五阶段分镜标签页的加载方法
             if hasattr(self, 'pages') and 'storyboard' in self.pages:
                 storyboard_tab = self.pages['storyboard']
@@ -1605,6 +1626,9 @@ class ModernCardMainWindow(QMainWindow):
                     # 确保项目管理器已设置（使用有get_character_scene_manager方法的版本）
                     if hasattr(self, 'storyboard_project_manager'):
                         storyboard_tab.project_manager = self.storyboard_project_manager
+                    elif hasattr(self, 'project_manager'):
+                        # 如果没有storyboard_project_manager，使用主项目管理器
+                        storyboard_tab.project_manager = self.project_manager
 
                     # 确保父窗口引用已设置
                     if not hasattr(storyboard_tab, 'parent_window'):
@@ -1622,6 +1646,25 @@ class ModernCardMainWindow(QMainWindow):
             logger.error(f"加载五阶段分镜数据失败: {e}")
             import traceback
             logger.error(f"错误详情: {traceback.format_exc()}")
+
+    def sync_project_managers(self):
+        """同步不同的项目管理器数据"""
+        try:
+            # 如果主项目管理器有当前项目，同步到分镜项目管理器
+            if hasattr(self, 'project_manager') and self.project_manager and self.project_manager.current_project:
+                if hasattr(self, 'storyboard_project_manager') and self.storyboard_project_manager:
+                    # 同步当前项目数据
+                    self.storyboard_project_manager.current_project = self.project_manager.current_project
+                    logger.info("✅ 已同步主项目管理器数据到分镜项目管理器")
+
+            # 反之，如果分镜项目管理器有数据，同步到主项目管理器
+            elif hasattr(self, 'storyboard_project_manager') and self.storyboard_project_manager and self.storyboard_project_manager.current_project:
+                if hasattr(self, 'project_manager') and self.project_manager:
+                    self.project_manager.current_project = self.storyboard_project_manager.current_project
+                    logger.info("✅ 已同步分镜项目管理器数据到主项目管理器")
+
+        except Exception as e:
+            logger.error(f"同步项目管理器失败: {e}")
 
     def load_image_generation_data(self, project_config):
         """加载图像生成数据"""

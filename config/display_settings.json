@@ -1,0 +1,24 @@
+{
+    "display": {
+        "auto_dpi_scaling": true,
+        "custom_scale_factor": 0.86,
+        "font_family": "Microsoft YaHei UI",
+        "base_font_size": 14,
+        "window_size": {
+            "width": 1200,
+            "height": 800,
+            "auto_resize": true
+        },
+        "ui_scaling": {
+            "button_height": 32,
+            "input_height": 28,
+            "icon_size": 16,
+            "spacing": 8
+        }
+    },
+    "theme": {
+        "style": "default",
+        "high_contrast": false,
+        "dark_mode": false
+    }
+}

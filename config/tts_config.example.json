@@ -1,0 +1,20 @@
+{
+  "default_engine": "edge",
+  "default_voice": "zh-CN-YunxiNeural (云希-男声)",
+  "default_rate": 1.0,
+  "default_volume": 1.0,
+  "generate_subtitle": false,
+  "output_format": "mp3",
+  "edge_tts": {
+    "enabled": true
+  },
+  "siliconflow": {
+    "enabled": false,
+    "api_key": "YOUR_SILICONFLOW_API_KEY_HERE",
+    "base_url": "https://api.siliconflow.cn/v1"
+  },
+  "audio": {
+    "output_dir": "output/audio",
+    "subtitle_dir": "output/subtitles"
+  }
+}

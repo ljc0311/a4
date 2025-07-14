@@ -1582,6 +1582,14 @@ class StoryboardImageGenerationTab(QWidget):
             # 更新表格
             self.update_table()
 
+            # 🔧 新增：强制刷新图像映射和预览
+            self._refresh_image_mappings()
+
+            # 🔧 新增：如果有选中的行，刷新预览
+            current_row = self.storyboard_table.currentRow()
+            if current_row >= 0:
+                self.on_selection_changed()
+
             logger.info(f"分镜数据刷新完成，共加载 {len(self.storyboard_data)} 个分镜")
             self.status_label.setText(f"已刷新加载 {len(self.storyboard_data)} 个分镜")
 
@@ -1591,7 +1599,47 @@ class StoryboardImageGenerationTab(QWidget):
             self.storyboard_data = []
             self.update_table()
             self.status_label.setText(f"加载失败: {str(e)}")
-            
+
+    def _refresh_image_mappings(self):
+        """刷新图像映射关系"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                return
+
+            project_data = self.project_manager.current_project
+            shot_image_mappings = project_data.get('shot_image_mappings', {})
+
+            # 更新每个分镜的图像路径
+            for shot_data in self.storyboard_data:
+                scene_id = shot_data.get('scene_id', 'scene_1')
+                shot_id = shot_data.get('shot_id', '')
+
+                # 构建映射键
+                mapping_key = f"{scene_id}_{shot_id}"
+
+                if mapping_key in shot_image_mappings:
+                    mapping_info = shot_image_mappings[mapping_key]
+                    main_image_path = mapping_info.get('main_image_path', '')
+
+                    if main_image_path and os.path.exists(main_image_path):
+                        shot_data['main_image_path'] = main_image_path
+                        shot_data['image_path'] = main_image_path
+                        shot_data['status'] = '已生成'
+
+                        # 更新生成的图像列表
+                        generated_images = mapping_info.get('generated_images', [])
+                        shot_data['generated_images'] = [img for img in generated_images if os.path.exists(img)]
+                        shot_data['current_image_index'] = mapping_info.get('current_image_index', 0)
+
+                        logger.debug(f"刷新图像映射: {mapping_key} -> {main_image_path}")
+                    else:
+                        logger.warning(f"图像文件不存在: {main_image_path}")
+
+            logger.info("图像映射关系刷新完成")
+
+        except Exception as e:
+            logger.error(f"刷新图像映射失败: {e}")
+
     def parse_storyboard_data(self, project_data):
         """解析分镜数据 - 统一使用prompt.json作为数据来源"""
         # 🔧 修复：统一数据来源，只使用prompt.json
@@ -5462,7 +5510,9 @@ class StoryboardImageGenerationTab(QWidget):
 
             shot_mappings = project_data.get('shot_image_mappings', {})
             if not shot_mappings:
-                logger.info("项目数据中没有图像映射信息")
+                logger.info("项目数据中没有图像映射信息，尝试重建映射")
+                # 尝试重建图像映射
+                self._rebuild_image_mappings()
                 return
 
             synced_count = 0
@@ -5488,6 +5538,88 @@ class StoryboardImageGenerationTab(QWidget):
 
         except Exception as e:
             logger.error(f"同步项目图像数据失败: {e}")
+
+    def _rebuild_image_mappings(self):
+        """重建图像映射关系"""
+        try:
+            if not self.project_manager or not self.project_manager.current_project:
+                return
+
+            project_dir = Path(self.project_manager.current_project['project_dir'])
+            images_dir = project_dir / 'images'
+
+            if not images_dir.exists():
+                logger.warning("项目图像目录不存在")
+                return
+
+            # 收集所有图像文件
+            image_files = []
+            for engine_dir in images_dir.iterdir():
+                if engine_dir.is_dir():
+                    for img_file in engine_dir.glob('*.png'):
+                        image_files.append(img_file)
+                    for img_file in engine_dir.glob('*.jpg'):
+                        image_files.append(img_file)
+                    for img_file in engine_dir.glob('*.jpeg'):
+                        image_files.append(img_file)
+
+            if not image_files:
+                logger.info("未找到任何图像文件")
+                return
+
+            # 重建映射关系
+            project_data = self.project_manager.get_project_data()
+            if 'shot_image_mappings' not in project_data:
+                project_data['shot_image_mappings'] = {}
+
+            rebuilt_count = 0
+            for shot_data in self.storyboard_data:
+                scene_id = shot_data.get('scene_id', '')
+                shot_id = shot_data.get('shot_id', '')
+                shot_key = f"{scene_id}_{shot_id}"
+
+                # 查找匹配的图像文件
+                matching_images = []
+                for img_file in image_files:
+                    # 尝试多种匹配模式
+                    filename = img_file.stem
+                    if (shot_id in filename or
+                        scene_id in filename or
+                        shot_data.get('sequence', '') in filename):
+                        matching_images.append(str(img_file))
+
+                if matching_images:
+                    # 使用第一个匹配的图像作为主图像
+                    main_image = matching_images[0]
+
+                    project_data['shot_image_mappings'][shot_key] = {
+                        'scene_id': scene_id,
+                        'shot_id': shot_id,
+                        'scene_name': shot_data.get('scene_name', ''),
+                        'shot_name': shot_data.get('shot_name', ''),
+                        'sequence': shot_data.get('sequence', ''),
+                        'main_image_path': main_image,
+                        'image_path': main_image,
+                        'generated_images': matching_images,
+                        'current_image_index': 0,
+                        'status': '已生成',
+                        'updated_time': datetime.now().isoformat()
+                    }
+
+                    # 同步到当前数据
+                    shot_data['main_image_path'] = main_image
+                    shot_data['generated_images'] = matching_images
+                    shot_data['status'] = '已生成'
+                    shot_data['current_image_index'] = 0
+
+                    rebuilt_count += 1
+
+            # 保存项目数据
+            self.project_manager.save_project_data(project_data)
+            logger.info(f"重建了 {rebuilt_count} 个图像映射关系")
+
+        except Exception as e:
+            logger.error(f"重建图像映射失败: {e}")
 
     def preview_prev_image(self):
         """预览区域的上一张图片"""

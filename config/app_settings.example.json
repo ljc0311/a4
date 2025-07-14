@@ -1,0 +1,39 @@
+{
+    "comfyui_output_dir": "YOUR_COMFYUI_OUTPUT_DIR_HERE",
+    "models": [
+        {
+            "name": "智谱AI",
+            "type": "zhipu",
+            "key": "YOUR_ZHIPU_API_KEY_HERE",
+            "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        },
+        {
+            "name": "通义千问",
+            "type": "tongyi",
+            "key": "YOUR_TONGYI_API_KEY_HERE",
+            "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        },
+        {
+            "name": "Deepseek",
+            "api_type": "deepseek",
+            "type": "deepseek",
+            "url": "https://api.deepseek.com/v1/chat/completions",
+            "key": "YOUR_DEEPSEEK_API_KEY_HERE"
+        }
+    ],
+    "ui_settings": {
+        "selected_style": "吉卜力风格"
+    },
+    "image_generation": {
+        "default_engine": "pollinations",
+        "pollinations": {
+            "enabled": true,
+            "base_url": "https://image.pollinations.ai/prompt"
+        },
+        "comfyui": {
+            "enabled": false,
+            "base_url": "http://127.0.0.1:8188",
+            "default_workflow": "flux.1-dev"
+        }
+    }
+}

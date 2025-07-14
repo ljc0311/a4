@@ -945,6 +945,11 @@ class VideoGenerationTab(QWidget):
 
             # 更新表格显示
             self.update_scene_table()
+
+            # 🔧 新增：强制刷新表格显示
+            self.scene_table.viewport().update()
+            self.scene_table.repaint()
+
             logger.info(f"成功加载 {len(self.current_scenes)} 个场景")
 
         except Exception as e:
@@ -1073,28 +1078,46 @@ class VideoGenerationTab(QWidget):
             # 方法1：从shot_image_mappings获取（主要数据源）
             shot_image_mappings = project_data.get('shot_image_mappings', {})
             if shot_image_mappings:
-                # 🔧 修复：使用统一ID管理器进行转换
-                possible_keys = [shot_id]  # 直接使用shot_id
+                # 🔧 修复：构建更全面的可能键名列表
+                possible_keys = []
 
-                # 使用ID管理器转换为统一格式
-                if hasattr(self, 'shot_id_manager') and self.shot_id_manager.shot_mappings:
-                    unified_key = self.shot_id_manager.convert_id(shot_id, "unified")
-                    if unified_key:
-                        possible_keys.append(unified_key)
-                        logger.debug(f"ID管理器转换: {shot_id} -> {unified_key}")
+                # 直接使用shot_id
+                possible_keys.append(shot_id)
 
-                # 保留原有的转换逻辑作为备用
+                # 如果shot_id是text_segment_xxx格式，生成对应的scene_shot格式
                 if shot_id.startswith('text_segment_'):
                     shot_number = shot_id.split('_')[-1]
-                    shot_num = str(int(shot_number))
+                    try:
+                        shot_num = str(int(shot_number))  # 去掉前导零
+                        possible_keys.extend([
+                            f"scene_1_{shot_id}",  # scene_1_text_segment_001
+                            f"scene_1_shot_{shot_num}",  # scene_1_shot_1
+                            f"scene_1_shot_{shot_number}",  # scene_1_shot_001
+                            f"shot_{shot_num}",  # shot_1
+                            f"shot_{shot_number}",  # shot_001
+                        ])
+                    except ValueError:
+                        pass
+
+                # 如果shot_id是shot_xxx格式，生成对应的scene_shot格式
+                elif shot_id.startswith('shot_'):
+                    shot_number = shot_id.split('_')[-1]
                     possible_keys.extend([
-                        f"scene_1_{shot_id}",  # scene_1_text_segment_001
-                        f"scene_1_shot_{shot_num}",  # scene_1_shot_1
-                        f"scene_1_shot_{shot_number}",  # scene_1_shot_001
-                        f"shot_{shot_num}",  # shot_1
-                        f"shot_{shot_number}",  # shot_001
+                        f"scene_1_{shot_id}",  # scene_1_shot_1
+                        f"text_segment_{shot_number.zfill(3)}",  # text_segment_001
                     ])
 
+                # 使用ID管理器转换为统一格式（如果可用）
+                if hasattr(self, 'shot_id_manager') and self.shot_id_manager and hasattr(self.shot_id_manager, 'shot_mappings'):
+                    try:
+                        unified_key = self.shot_id_manager.convert_id(shot_id, "unified")
+                        if unified_key and unified_key not in possible_keys:
+                            possible_keys.append(unified_key)
+                            logger.debug(f"ID管理器转换: {shot_id} -> {unified_key}")
+                    except Exception as e:
+                        logger.debug(f"ID管理器转换失败: {e}")
+
+                # 尝试所有可能的键名
                 for key in possible_keys:
                     if key in shot_image_mappings:
                         img_data = shot_image_mappings[key]
@@ -1103,6 +1126,18 @@ class VideoGenerationTab(QWidget):
                         image_status = img_data.get('status', '未生成')
                         logger.debug(f"从shot_image_mappings找到图像: {key} -> {image_path} (主图优先)")
                         break
+
+                # 如果还没找到，尝试模糊匹配
+                if not image_path:
+                    for mapping_key, img_data in shot_image_mappings.items():
+                        # 检查键名是否包含shot_id的数字部分
+                        if shot_id.startswith('text_segment_'):
+                            shot_number = shot_id.split('_')[-1]
+                            if shot_number in mapping_key:
+                                image_path = img_data.get('main_image_path', '') or img_data.get('image_path', '')
+                                image_status = img_data.get('status', '未生成')
+                                logger.debug(f"模糊匹配找到图像: {mapping_key} -> {image_path}")
+                                break
 
             # 方法2：从image_generation获取
             if not image_path:

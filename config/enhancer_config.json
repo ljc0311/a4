@@ -1,0 +1,56 @@
+{
+  "enable_technical_details": true,
+  "enable_consistency_injection": true,
+  "enhancement_level": "medium",
+  "fusion_strategy": "intelligent",
+  "quality_threshold": 0.6,
+  "max_enhancement_length": 500,
+  "min_enhancement_length": 50,
+  "cache_enabled": true,
+  "cache_size": 2000,
+  "batch_processing": false,
+  "max_batch_size": 10,
+  "strategy_weights": {
+    "natural": 1.0,
+    "structured": 0.8,
+    "minimal": 0.6,
+    "intelligent": 1.2
+  },
+  "custom_rules": {
+    "technical_keywords": [
+      "镜头语言",
+      "构图",
+      "光影",
+      "色彩",
+      "景深",
+      "角度",
+      "运动",
+      "节奏",
+      "氛围",
+      "质感"
+    ],
+    "consistency_keywords": [
+      "角色外貌",
+      "服装",
+      "道具",
+      "场景",
+      "风格",
+      "色调",
+      "时间",
+      "天气",
+      "情绪",
+      "主题"
+    ],
+    "enhancement_templates": {
+      "technical": "[技术细节] {content}",
+      "consistency": "[一致性要求] {content}",
+      "atmosphere": "[氛围营造] {content}"
+    }
+  },
+  "debug_mode": false,
+  "log_level": "INFO",
+  "performance_monitoring": true,
+  "performance_mode": "balanced",
+  "cache_size_limit": 100,
+  "concurrent_processes": 2
+}

@@ -96,10 +96,23 @@ ffmpeg/doc/
 sound_library/
 
 # Test results
-*.json
 test_*.py
 
 # System files
 *.pid
 *.seed
 *.pid.lock
+
+# Browser data and selenium
+selenium_chrome_data/
+chromedriver-win64/
+chromedriver.exe
+
+# Data directories
+data/
+
+# Chrome debug files
+start_chrome_debug.bat
+
+# Publisher specific
+config/publisher_config.py

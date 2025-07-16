@@ -283,13 +283,8 @@ class AIDrawingTab(QWidget):
 
     def get_seed_value(self):
         """根据种子模式获取种子值"""
-        import random
-        if self.seed_combo.currentText() == "随机":
-            return random.randint(0, 2147483647)
-        else:  # 固定
-            # 生成一个固定的种子值，基于当前时间戳
-            import time
-            return int(time.time()) % 2147483647
+        from src.utils.gui_utils import get_seed_value_from_combo
+        return get_seed_value_from_combo(self.seed_combo)
         
     def on_engine_changed(self):
         """当引擎选择改变时调用"""
@@ -1326,12 +1321,8 @@ class AIDrawingTab(QWidget):
     
     def get_main_window(self):
         """获取主窗口"""
-        widget = self
-        while widget.parent():
-            widget = widget.parent()
-            if hasattr(widget, 'tab_widget'):
-                return widget
-        return None
+        from src.utils.gui_utils import get_main_window_from_widget
+        return get_main_window_from_widget(self)
     
     def find_storyboard_tab(self, main_window):
         """查找分镜图像生成标签页"""

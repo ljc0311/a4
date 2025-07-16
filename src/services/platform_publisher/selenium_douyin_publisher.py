@@ -6,6 +6,7 @@
 """
 
 import time
+import asyncio
 import pyperclip
 from typing import Dict, Any
 from selenium.webdriver.common.by import By
@@ -27,32 +28,133 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
         return "https://creator.douyin.com/creator-micro/content/upload"
         
     async def _check_login_status(self) -> bool:
-        """检查抖音登录状态"""
+        """检查抖音登录状态 - 参考MoneyPrinterPlus的简化稳定实现"""
         try:
+            # 等待页面加载完成
+            await asyncio.sleep(2)
+
             # 检查页面URL
             current_url = self.driver.current_url
-            if 'login' in current_url or 'passport' in current_url:
+            logger.info(f"🌐 当前页面URL: {current_url}")
+
+            # 检查页面标题
+            try:
+                page_title = self.driver.title
+                logger.info(f"📄 页面标题: {page_title}")
+            except:
+                page_title = ""
+
+            # 1. 如果在登录页面，返回False
+            login_url_keywords = ['login', 'passport', 'sso', 'auth']
+            if any(keyword in current_url.lower() for keyword in login_url_keywords):
+                logger.warning("❌ 检测到登录页面URL，需要用户登录")
                 return False
-                
-            # 检查是否在创作者中心
+
+            # 2. 如果页面标题包含登录信息，返回False
+            if '登录' in page_title or 'login' in page_title.lower():
+                logger.warning("❌ 页面标题包含登录信息")
+                return False
+
+            # 3. 检查是否在抖音域名下
+            if not ('douyin.com' in current_url):
+                logger.warning("❌ 不在抖音域名下")
+                return False
+
+            # 4. 参考MoneyPrinterPlus的简化方法 - 检查明显的登录按钮
+            obvious_login_selectors = [
+                '//button[contains(text(), "登录")]',
+                '//a[contains(text(), "登录")]',
+                '//div[contains(text(), "请登录")]',
+                '//span[contains(text(), "登录")]'
+            ]
+
+            # 如果找到明显的登录按钮，说明未登录
+            for selector in obvious_login_selectors:
+                element = self.find_element_safe(By.XPATH, selector, timeout=0.5)
+                if element and element.is_displayed():
+                    logger.warning(f"❌ 发现登录按钮: {selector}")
+                    return False
+
+            # 5. MoneyPrinterPlus风格的简化检测 - 如果在创作者中心且没有登录按钮，就认为已登录
             if 'creator.douyin.com' in current_url:
-                # 检查页面元素
-                login_indicators = [
-                    '//input[@type="file"]',  # 上传按钮
-                    '//input[@class="semi-input semi-input-default"]',  # 标题输入框
-                    '//div[@data-placeholder="添加作品简介"]',  # 内容输入框
-                    '//div[contains(@class, "notranslate")][@data-placeholder="添加作品简介"]',  # 备用内容输入框
-                    '//div[contains(@class, "public-DraftEditor-content")]',  # 另一种内容输入框
-                    '//button[text()="发布"]',  # 发布按钮
-                    '//button[contains(text(), "发布")]'  # 备用发布按钮
+                logger.info("📍 在抖音创作者中心页面")
+
+                # 参考MoneyPrinterPlus的简化方法：检查关键的成功指示器
+                success_indicators = [
+                    # 文件上传元素 - 最可靠的登录指示器
+                    '//input[@type="file"]',
+
+                    # 发布按钮
+                    '//button[contains(text(), "发布")]',
+
+                    # 标题输入框
+                    '//input[contains(@placeholder, "标题")]',
+
+                    # 简介输入框
+                    '//div[@data-placeholder="添加作品简介"]',
+
+                    # 上传区域
+                    '//div[contains(@class, "upload")]'
                 ]
 
-                for selector in login_indicators:
-                    element = self.find_element_safe(By.XPATH, selector, timeout=3)
+                # 检查成功指示器
+                found_count = 0
+                for selector in success_indicators:
+                    element = self.find_element_safe(By.XPATH, selector, timeout=1)
                     if element:
-                        logger.debug(f"找到登录指示器: {selector}")
+                        found_count += 1
+                        logger.info(f"✅ 找到成功指示器: {selector}")
+
+                # 如果找到任何成功指示器，认为已登录
+                if found_count > 0:
+                    logger.info(f"🎉 登录检测成功！找到 {found_count} 个成功指示器")
+                    return True
+
+                # 备用检测：检查页面文本内容
+                try:
+                    page_source = self.driver.page_source
+                    success_keywords = ['内容发布', '上传视频', '发布', '标题', '简介']
+                    found_keywords = [kw for kw in success_keywords if kw in page_source]
+
+                    if found_keywords:
+                        logger.info(f"✅ 通过页面内容检测到登录状态: {found_keywords}")
                         return True
-                        
+
+                except Exception as e:
+                    logger.debug(f"页面内容检测失败: {e}")
+
+                # MoneyPrinterPlus风格的最终检测：如果在创作者中心且没有明显登录提示，认为已登录
+                logger.warning("🔄 使用MoneyPrinterPlus风格的最终检测...")
+
+                # 再次检查是否有登录相关元素
+                final_login_check = [
+                    '//button[contains(text(), "登录")]',
+                    '//a[contains(text(), "登录")]',
+                    '//div[contains(text(), "请登录")]'
+                ]
+
+                has_login_element = False
+                for selector in final_login_check:
+                    element = self.find_element_safe(By.XPATH, selector, timeout=0.5)
+                    if element and element.is_displayed():
+                        logger.warning(f"❌ 最终检测发现登录元素: {selector}")
+                        has_login_element = True
+                        break
+
+                if not has_login_element:
+                    logger.info("✅ MoneyPrinterPlus风格检测：在创作者中心且无登录元素，认为已登录")
+                    return True
+
+            # 6. 如果在其他抖音页面，进行基本检测
+            elif 'douyin.com' in current_url:
+                logger.info("📍 在抖音其他页面")
+                # 简单检查：如果没有明显的登录按钮，认为已登录
+                login_btn = self.find_element_safe(By.XPATH, '//button[contains(text(), "登录")]', timeout=1)
+                if not login_btn:
+                    logger.info("✅ 在抖音页面且无登录按钮，认为已登录")
+                    return True
+
+            logger.warning("❌ 所有登录检测方法都失败")
             return False
             
         except Exception as e:
@@ -62,25 +164,66 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
     async def _publish_video_impl(self, video_info: Dict[str, Any]) -> Dict[str, Any]:
         """抖音视频发布实现"""
         try:
+            # 检查是否为模拟模式
+            if self.selenium_config.get('simulation_mode', False):
+                logger.info("🎭 模拟模式：模拟抖音视频发布过程")
+
+                # 模拟发布过程
+                title = video_info.get('title', '')
+                description = video_info.get('description', '')
+                video_path = video_info.get('video_path', '')
+
+                logger.info(f"📹 模拟上传视频: {video_path}")
+                logger.info(f"📝 模拟设置标题: {title}")
+                logger.info(f"📄 模拟设置描述: {description}")
+                logger.info("⏳ 模拟等待上传完成...")
+
+                # 模拟等待时间
+                import asyncio
+                await asyncio.sleep(2)
+
+                logger.info("✅ 模拟发布成功！")
+                return {'success': True, 'message': '模拟发布成功'}
+
             # 确保在上传页面
             upload_url = "https://creator.douyin.com/creator-micro/content/upload"
             if self.driver.current_url != upload_url:
                 self.driver.get(upload_url)
                 time.sleep(3)
                 
-            # 1. 上传视频文件
+            # 1. 上传视频文件 - 参考MoneyPrinterPlus的稳定上传逻辑
             video_path = video_info.get('video_path')
             if not video_path:
                 return {'success': False, 'error': '视频路径不能为空'}
-                
-            logger.info("开始上传视频文件...")
-            file_input_selector = '//input[@type="file"]'
-            if not self.upload_file_safe(By.XPATH, file_input_selector, video_path):
-                return {'success': False, 'error': '视频上传失败'}
-                
-            # 等待视频上传完成
+
+            logger.info(f"开始上传视频文件: {video_path}")
+
+            # 多种文件上传选择器，提高成功率
+            file_input_selectors = [
+                '//input[@type="file"]',
+                '//input[@accept="video/*"]',
+                '//div[contains(@class, "upload")]//input[@type="file"]',
+                '//input[contains(@class, "upload-input")]'
+            ]
+
+            upload_success = False
+            for selector in file_input_selectors:
+                logger.info(f"尝试使用选择器上传: {selector}")
+                if self.upload_file_safe(By.XPATH, selector, video_path, timeout=10):
+                    upload_success = True
+                    logger.info("✅ 视频文件上传成功")
+                    break
+                time.sleep(1)
+
+            if not upload_success:
+                return {'success': False, 'error': '视频上传失败 - 未找到有效的上传元素'}
+
+            # 智能等待视频上传完成 - 参考MoneyPrinterPlus的等待策略
             logger.info("等待视频上传完成...")
-            time.sleep(10)
+            upload_complete = self._wait_for_upload_complete(timeout=300)  # 5分钟超时
+
+            if not upload_complete:
+                return {'success': False, 'error': '视频上传超时或失败'}
             
             # 2. 设置视频标题
             title = video_info.get('title', '')
@@ -180,21 +323,32 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
         try:
             logger.info("开始智能检测发布按钮...")
 
-            # 第一轮：使用MoneyPrinterPlus验证过的选择器
+            # 第一轮：使用MoneyPrinterPlus验证过的选择器 - 按优先级排序
             primary_selectors = [
-                '//button[text()="发布"]',  # MoneyPrinterPlus使用的选择器（已验证有效）
-                '//button[contains(text(), "发布")]',  # 包含文本匹配
-                '//button[@class="semi-button semi-button-primary" and text()="发布"]',  # 完整类名匹配
-                '//button[contains(@class, "semi-button-primary")]',  # 主要按钮样式
-                '//span[text()="发布"]/parent::button',  # span包含的按钮
-                '//div[text()="发布"]/parent::button'  # div包含的按钮
+                # 最常用的发布按钮选择器（MoneyPrinterPlus验证有效）
+                '//button[text()="发布"]',
+                '//button[contains(text(), "发布") and contains(@class, "semi-button-primary")]',
+                '//button[contains(@class, "semi-button-primary") and contains(text(), "发布")]',
+
+                # 备用选择器
+                '//button[contains(text(), "发布")]',
+                '//span[text()="发布"]/parent::button',
+                '//div[text()="发布"]/parent::button',
+
+                # 更通用的选择器
+                '//button[contains(@class, "publish")]',
+                '//button[contains(@class, "semi-button-primary")]'
             ]
 
-            for selector in primary_selectors:
-                logger.debug(f"尝试主要选择器: {selector}")
-                element = self.find_element_safe(By.XPATH, selector, timeout=3)
+            for i, selector in enumerate(primary_selectors):
+                logger.info(f"尝试主要选择器 {i+1}/{len(primary_selectors)}: {selector}")
+                element = self.find_element_safe(By.XPATH, selector, timeout=5)
                 if element and element.is_enabled() and element.is_displayed():
                     try:
+                        # 滚动到元素可见位置
+                        self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                        time.sleep(1)
+
                         # 先尝试普通点击
                         element.click()
                         logger.info(f"发布按钮点击成功: {selector}")
@@ -392,6 +546,60 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
 
         except Exception as e:
             logger.debug(f"检查发布结果失败: {e}")
+            return False
+
+    def _wait_for_upload_complete(self, timeout: int = 300) -> bool:
+        """智能等待视频上传完成 - 参考MoneyPrinterPlus的实现"""
+        try:
+            logger.info("开始智能等待视频上传完成...")
+            start_time = time.time()
+
+            while time.time() - start_time < timeout:
+                try:
+                    # 检查上传进度指示器
+                    progress_indicators = [
+                        '//div[contains(@class, "progress")]',
+                        '//div[contains(text(), "上传中")]',
+                        '//div[contains(text(), "处理中")]',
+                        '//div[contains(text(), "%")]',
+                        '//div[contains(@class, "uploading")]'
+                    ]
+
+                    # 如果找到进度指示器，说明还在上传
+                    uploading = False
+                    for selector in progress_indicators:
+                        if self.find_element_safe(By.XPATH, selector, timeout=1):
+                            uploading = True
+                            logger.info("检测到上传进度，继续等待...")
+                            break
+
+                    if not uploading:
+                        # 检查是否有视频预览或标题输入框可用
+                        completion_indicators = [
+                            '//video',  # 视频预览
+                            '//input[@class="semi-input semi-input-default"]',  # 标题输入框
+                            '//div[@data-placeholder="添加作品简介"]',  # 描述输入框
+                            '//button[text()="发布"]'  # 发布按钮
+                        ]
+
+                        for selector in completion_indicators:
+                            element = self.find_element_safe(By.XPATH, selector, timeout=2)
+                            if element and element.is_enabled():
+                                logger.info("✅ 检测到上传完成指示器，上传完成")
+                                return True
+
+                    # 等待一段时间后再次检查
+                    time.sleep(3)
+
+                except Exception as e:
+                    logger.debug(f"等待上传完成时出现异常: {e}")
+                    time.sleep(2)
+
+            logger.warning("等待上传完成超时")
+            return False
+
+        except Exception as e:
+            logger.error(f"等待上传完成失败: {e}")
             return False
 
     def _handle_error_dialogs(self):

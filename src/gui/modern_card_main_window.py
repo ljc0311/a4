@@ -488,22 +488,30 @@ class ModernCardMainWindow(QMainWindow):
                 self.pages["composition"] = placeholder_widget
                 self.content_stack.addWidget(self.pages["composition"])
 
-        # 一键发布页面
+        # 简化版增强一键发布页面
         try:
-            from .simple_one_click_publish_tab import SimpleOneClickPublishTab
-            self.pages["publish"] = SimpleOneClickPublishTab(self)
+            from .simplified_enhanced_publish_tab import SimplifiedEnhancedPublishTab
+            self.pages["publish"] = SimplifiedEnhancedPublishTab(self)
             self.content_stack.addWidget(self.pages["publish"])
-            logger.info("一键发布页面创建成功")
+            logger.info("简化版增强一键发布页面创建成功")
         except Exception as e:
-            logger.error(f"一键发布页面创建失败: {e}")
-            # 创建占位符页面
-            placeholder_widget = QWidget()
-            placeholder_layout = QVBoxLayout(placeholder_widget)
-            placeholder_label = QLabel(f"🚀 一键发布功能暂时不可用\n错误: {e}")
-            placeholder_label.setAlignment(Qt.AlignCenter)
-            placeholder_layout.addWidget(placeholder_label)
-            self.pages["publish"] = placeholder_widget
-            self.content_stack.addWidget(self.pages["publish"])
+            logger.error(f"简化版增强一键发布页面创建失败: {e}")
+            # 回退到原始简化版
+            try:
+                from .simple_one_click_publish_tab import SimpleOneClickPublishTab
+                self.pages["publish"] = SimpleOneClickPublishTab(self)
+                self.content_stack.addWidget(self.pages["publish"])
+                logger.info("回退到原始简化版一键发布页面")
+            except Exception as e2:
+                logger.error(f"原始简化版一键发布页面也创建失败: {e2}")
+                # 创建占位符页面
+                placeholder_widget = QWidget()
+                placeholder_layout = QVBoxLayout(placeholder_widget)
+                placeholder_label = QLabel(f"🚀 一键发布功能暂时不可用\n错误: {e}")
+                placeholder_label.setAlignment(Qt.AlignCenter)
+                placeholder_layout.addWidget(placeholder_label)
+                self.pages["publish"] = placeholder_widget
+                self.content_stack.addWidget(self.pages["publish"])
 
         # 一致性控制页面
         self.pages["consistency"] = ConsistencyControlPanel(None, self.project_manager, self)

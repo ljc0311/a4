@@ -702,12 +702,24 @@ class SimpleOneClickPublishTab(QWidget):
         self.publish_method_group.addButton(self.selenium_radio, 1)
         method_layout.addWidget(self.selenium_radio)
 
+        # 模拟模式选项
+        self.simulation_mode_checkbox = QCheckBox("启用模拟模式")
+        self.simulation_mode_checkbox.setChecked(False)  # 默认不启用
+        self.simulation_mode_checkbox.setToolTip("模拟模式仅用于测试，不会实际发布视频")
+        method_layout.addWidget(self.simulation_mode_checkbox)
+
         # 添加说明文本
         method_info = QLabel("""
 💡 发布方式说明:
 • API发布: 使用官方API，稳定可靠，目前支持B站
 • 浏览器自动化: 基于MoneyPrinterPlus方案，支持抖音、B站等更多平台
-  需要先启动Chrome调试模式并手动登录各平台
+  - 真实模式: 实际发布视频（默认）
+  - 模拟模式: 仅用于测试，不会实际发布视频
+
+🔧 抖音发布步骤:
+1. 运行 start_chrome_debug.bat 启动Chrome调试模式
+2. 在Chrome中手动登录抖音创作者平台
+3. 返回程序，选择抖音平台并点击发布
         """)
         method_info.setStyleSheet("color: #666; font-size: 11px; padding: 5px;")
         method_layout.addWidget(method_info)
@@ -716,29 +728,52 @@ class SimpleOneClickPublishTab(QWidget):
 
         # 平台选择
         platform_group = QGroupBox("目标平台")
-        platform_layout = QVBoxLayout(platform_group)
-        
-        self.platform_checkboxes = {}
-        supported_platforms = self.publisher.get_supported_platforms()
+        platform_layout = QGridLayout(platform_group)
 
-        # 定义主要平台和显示名称（去除重复）
-        main_platforms = {
-            'bilibili': 'B站 (Bilibili)',
-            'douyin': '抖音 (TikTok)',
-            'kuaishou': '快手 (Kuaishou)',
-            'xiaohongshu': '小红书 (RedBook)',
-            'wechat_channels': '微信视频号',
-            'youtube': 'YouTube Shorts'
+        self.platform_checkboxes = {}
+        all_supported_platforms = self.publisher.get_supported_platforms()
+
+        # 界面显示的主要平台（避免重复显示中英文名称）
+        main_platforms = ['douyin', 'bilibili', 'kuaishou', 'xiaohongshu', 'wechat', 'youtube']
+        supported_platforms = [p for p in main_platforms if p in all_supported_platforms]
+
+        # 平台图标和显示名称映射
+        platform_info = {
+            'douyin': {'icon': '🎵', 'name': '抖音'},
+            'bilibili': {'icon': '📺', 'name': 'B站'},
+            'kuaishou': {'icon': '⚡', 'name': '快手'},
+            'xiaohongshu': {'icon': '📖', 'name': '小红书'},
+            'wechat': {'icon': '💬', 'name': '微信视频号'},
+            'youtube': {'icon': '🎬', 'name': 'YouTube'}
         }
 
-        # 只显示主要平台，避免重复
-        for platform, display_name in main_platforms.items():
-            if platform in supported_platforms:
-                checkbox = QCheckBox(display_name)
-                if platform == 'bilibili':  # 默认选中B站
-                    checkbox.setChecked(True)
-                self.platform_checkboxes[platform] = checkbox
-                platform_layout.addWidget(checkbox)
+        # 使用网格布局，每行3个平台
+        row = 0
+        col = 0
+        for platform in supported_platforms:
+            info = platform_info.get(platform, {'icon': '📱', 'name': platform.upper()})
+            checkbox = QCheckBox(f"{info['icon']} {info['name']}")
+            checkbox.setStyleSheet("""
+                QCheckBox {
+                    font-size: 12px;
+                    padding: 5px;
+                    min-width: 120px;
+                }
+                QCheckBox::indicator {
+                    width: 16px;
+                    height: 16px;
+                }
+            """)
+
+            if platform == 'bilibili':  # 默认选中B站
+                checkbox.setChecked(True)
+            self.platform_checkboxes[platform] = checkbox
+            platform_layout.addWidget(checkbox, row, col)
+
+            col += 1
+            if col >= 3:  # 每行3个
+                col = 0
+                row += 1
             
         layout.addWidget(platform_group)
         
@@ -938,11 +973,13 @@ class SimpleOneClickPublishTab(QWidget):
             # 根据发布方式创建工作线程
             if use_selenium:
                 # 使用Selenium发布
+                simulation_mode = self.simulation_mode_checkbox.isChecked()
                 selenium_config = {
                     'driver_type': 'chrome',
                     'debugger_address': '127.0.0.1:9222',
                     'timeout': 30,
-                    'headless': False
+                    'headless': False,
+                    'simulation_mode': simulation_mode
                 }
 
                 self.current_worker = SeleniumPublishWorker(

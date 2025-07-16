@@ -11,7 +11,7 @@ from typing import Dict, Optional, Callable
 from enum import Enum
 from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtCore import QObject, pyqtSignal, QSettings
-from PyQt5.QtGui import QPalette, QColor, QFont
+from PyQt5.QtGui import QColor, QFont
 
 from src.utils.logger import logger
 

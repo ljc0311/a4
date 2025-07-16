@@ -198,13 +198,8 @@ class AIDrawingWidget(QWidget):
 
     def get_seed_value(self):
         """根据种子模式获取种子值"""
-        import random
-        if self.seed_combo.currentText() == "随机":
-            return random.randint(0, 2147483647)
-        else:  # 固定
-            # 生成一个固定的种子值，基于当前时间戳
-            import time
-            return int(time.time()) % 2147483647
+        from src.utils.gui_utils import get_seed_value_from_combo
+        return get_seed_value_from_combo(self.seed_combo)
         
     def create_comfyui_tab(self):
         """创建ComfyUI配置标签页"""

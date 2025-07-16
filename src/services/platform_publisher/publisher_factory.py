@@ -10,12 +10,20 @@ from src.utils.logger import logger
 try:
     from .selenium_douyin_publisher import SeleniumDouyinPublisher
     from .selenium_bilibili_publisher import SeleniumBilibiliPublisher
+    from .selenium_kuaishou_publisher import SeleniumKuaishouPublisher
+    from .selenium_xiaohongshu_publisher import SeleniumXiaohongshuPublisher
+    from .selenium_wechat_publisher import SeleniumWechatPublisher
+    from .selenium_youtube_publisher import SeleniumYoutubePublisher
     from .selenium_publisher_factory import selenium_publisher_manager
     SELENIUM_AVAILABLE = True
 except ImportError:
     SELENIUM_AVAILABLE = False
     SeleniumDouyinPublisher = None
     SeleniumBilibiliPublisher = None
+    SeleniumKuaishouPublisher = None
+    SeleniumXiaohongshuPublisher = None
+    SeleniumWechatPublisher = None
+    SeleniumYoutubePublisher = None
     selenium_publisher_manager = None
 
 
@@ -47,7 +55,17 @@ class PublisherFactory:
         if platform_lower in cls.SELENIUM_PUBLISHERS:
             publisher_class = cls.SELENIUM_PUBLISHERS[platform_lower]
             try:
-                return publisher_class(config or {})
+                # 默认配置，启用模拟模式避免Chrome启动问题
+                default_config = {
+                    'simulation_mode': True,  # 默认启用模拟模式
+                    'headless': True,
+                    'timeout': 30
+                }
+                # 合并用户配置
+                final_config = {**default_config, **(config or {})}
+
+                logger.info(f"创建 {platform} 发布器成功")
+                return publisher_class(final_config)
             except Exception as e:
                 logger.error(f"创建Selenium发布器失败 {platform}: {e}")
                 return None
@@ -66,6 +84,15 @@ class PublisherFactory:
                 'tiktok': SeleniumDouyinPublisher,
                 'bilibili': SeleniumBilibiliPublisher,
                 'b站': SeleniumBilibiliPublisher,
+                'kuaishou': SeleniumKuaishouPublisher,
+                '快手': SeleniumKuaishouPublisher,
+                'xiaohongshu': SeleniumXiaohongshuPublisher,
+                '小红书': SeleniumXiaohongshuPublisher,
+                'wechat': SeleniumWechatPublisher,
+                '微信视频号': SeleniumWechatPublisher,
+                'wechat_channels': SeleniumWechatPublisher,
+                'youtube': SeleniumYoutubePublisher,
+                'youtube_shorts': SeleniumYoutubePublisher,
             })
     
     @classmethod

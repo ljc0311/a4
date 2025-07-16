@@ -9,6 +9,10 @@ from typing import Dict, Any, Optional
 from .selenium_publisher_base import SeleniumPublisherBase
 from .selenium_douyin_publisher import SeleniumDouyinPublisher
 from .selenium_bilibili_publisher import SeleniumBilibiliPublisher
+from .selenium_kuaishou_publisher import SeleniumKuaishouPublisher
+from .selenium_xiaohongshu_publisher import SeleniumXiaohongshuPublisher
+from .selenium_wechat_publisher import SeleniumWechatPublisher
+from .selenium_youtube_publisher import SeleniumYoutubePublisher
 from src.utils.logger import logger
 
 
@@ -19,10 +23,11 @@ class SeleniumPublisherFactory:
     SUPPORTED_PLATFORMS = {
         'douyin': SeleniumDouyinPublisher,
         'bilibili': SeleniumBilibiliPublisher,
+        'kuaishou': SeleniumKuaishouPublisher,
+        'xiaohongshu': SeleniumXiaohongshuPublisher,
+        'wechat': SeleniumWechatPublisher,
+        'youtube': SeleniumYoutubePublisher,
         # 可以继续添加其他平台
-        # 'kuaishou': SeleniumKuaishouPublisher,
-        # 'xiaohongshu': SeleniumXiaohongshuPublisher,
-        # 'shipinhao': SeleniumShipinhaoPublisher,
     }
     
     @classmethod
@@ -41,7 +46,8 @@ class SeleniumPublisherFactory:
                 'debugger_address': '127.0.0.1:9222',
                 'timeout': 30,
                 'implicit_wait': 10,
-                'headless': False
+                'headless': False,
+                'simulation_mode': False  # 默认不启用模拟模式
             }
             
             # 合并配置
@@ -91,17 +97,17 @@ class SeleniumPublisherManager:
             if platform not in self.publishers:
                 publisher = SeleniumPublisherFactory.create_publisher(platform, self.config)
                 if publisher:
-                    # 初始化发布器
-                    if await publisher.initialize():
+                    # 初始化发布器（同步方法）
+                    if publisher.initialize():
                         self.publishers[platform] = publisher
                     else:
                         logger.error(f"{platform} 发布器初始化失败")
                         return None
                 else:
                     return None
-                    
+
             return self.publishers[platform]
-            
+
         except Exception as e:
             logger.error(f"获取 {platform} 发布器失败: {e}")
             return None

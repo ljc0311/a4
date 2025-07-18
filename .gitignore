@@ -116,3 +116,37 @@ start_chrome_debug.bat
 
 # Publisher specific
 config/publisher_config.py
+
+# Additional configuration files
+config/display_settings.json
+config/enhancer_config.json
+config/system_settings.json
+
+# Browser and selenium data
+browser_data/
+selenium/
+browser_config.json
+
+# Edge browser data
+**/edge/
+**/Edge/
+**/History
+**/Cookies
+**/Login Data
+**/Web Data
+
+# Backup files
+backup/
+backup_*/
+cleanup_backup/
+project_backup_*.zip
+
+# Cleanup and temporary scripts
+cleanup_*.py
+safe_cleanup_*.py
+
+# Chrome driver and browser files
+drivers/chromedriver.exe
+
+# User data directories
+user_data/

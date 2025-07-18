@@ -40,14 +40,15 @@ class SeleniumPublisherFactory:
                 
             publisher_class = cls.SUPPORTED_PLATFORMS[platform]
             
-            # 默认配置
+            # 🔧 优化：默认使用Firefox配置
             default_config = {
-                'driver_type': 'chrome',
-                'debugger_address': '127.0.0.1:9222',
+                'driver_type': 'firefox',  # 改为Firefox
                 'timeout': 30,
                 'implicit_wait': 10,
                 'headless': False,
-                'simulation_mode': False  # 默认不启用模拟模式
+                'simulation_mode': False,  # 默认不启用模拟模式
+                'firefox_profile': None,   # 使用默认配置文件
+                'user_friendly': True      # 用户友好模式
             }
             
             # 合并配置
@@ -79,12 +80,14 @@ class SeleniumPublisherManager:
     
     def __init__(self):
         self.publishers: Dict[str, SeleniumPublisherBase] = {}
+        # 🔧 优化：默认使用Firefox配置
         self.config = {
-            'driver_type': 'chrome',
-            'debugger_address': '127.0.0.1:9222',
+            'driver_type': 'firefox',  # 改为Firefox
             'timeout': 30,
             'implicit_wait': 10,
-            'headless': False
+            'headless': False,
+            'firefox_profile': None,   # 使用默认配置文件
+            'user_friendly': True      # 用户友好模式
         }
         
     def set_config(self, config: Dict[str, Any]):

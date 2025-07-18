@@ -490,20 +490,20 @@ class ModernCardMainWindow(QMainWindow):
 
         # 简化版增强一键发布页面
         try:
-            from .simplified_enhanced_publish_tab import SimplifiedEnhancedPublishTab
-            self.pages["publish"] = SimplifiedEnhancedPublishTab(self)
+            from .simple_one_click_publish_tab import SimpleOneClickPublishTab
+            self.pages["publish"] = SimpleOneClickPublishTab(self)
             self.content_stack.addWidget(self.pages["publish"])
-            logger.info("简化版增强一键发布页面创建成功")
+            logger.info("简化版一键发布页面创建成功")
         except Exception as e:
-            logger.error(f"简化版增强一键发布页面创建失败: {e}")
-            # 回退到原始简化版
+            logger.error(f"简化版一键发布页面创建失败: {e}")
+            # 回退到增强版
             try:
-                from .simple_one_click_publish_tab import SimpleOneClickPublishTab
-                self.pages["publish"] = SimpleOneClickPublishTab(self)
+                from .simplified_enhanced_publish_tab import SimplifiedEnhancedPublishTab
+                self.pages["publish"] = SimplifiedEnhancedPublishTab(self)
                 self.content_stack.addWidget(self.pages["publish"])
-                logger.info("回退到原始简化版一键发布页面")
+                logger.info("回退到增强版一键发布页面")
             except Exception as e2:
-                logger.error(f"原始简化版一键发布页面也创建失败: {e2}")
+                logger.error(f"增强版一键发布页面也创建失败: {e2}")
                 # 创建占位符页面
                 placeholder_widget = QWidget()
                 placeholder_layout = QVBoxLayout(placeholder_widget)

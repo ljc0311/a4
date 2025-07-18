@@ -137,13 +137,24 @@ class SeleniumPublishWorker(QThread):
             if self.config:
                 selenium_publisher_manager.set_config(self.config)
 
+            # 🔧 修复问题3：创建进度回调函数
+            def progress_callback(message: str, progress: int):
+                """进度回调函数"""
+                try:
+                    # 将进度转换为0-1范围
+                    normalized_progress = progress / 100.0
+                    self.progress_updated.emit(normalized_progress, message)
+                except Exception as e:
+                    logger.debug(f"进度回调失败: {e}")
+
             # 准备视频信息
             video_info = {
                 'video_path': self.video_path,
                 'title': self.metadata.title,
                 'description': self.metadata.description,
                 'tags': self.metadata.tags,
-                'auto_publish': False,  # 默认不自动发布，让用户手动确认
+                'auto_publish': True,  # 🔧 修复：启用自动发布
+                'progress_callback': progress_callback,  # 🔧 修复问题3：传递进度回调
             }
 
             # 发布到各平台
@@ -152,8 +163,8 @@ class SeleniumPublishWorker(QThread):
 
             for i, platform in enumerate(self.platforms):
                 try:
-                    progress = (i / total_platforms) * 0.9
-                    self.progress_updated.emit(progress, f"发布到 {platform}...")
+                    base_progress = (i / total_platforms) * 100
+                    progress_callback(f"开始发布到 {platform}...", int(base_progress))
 
                     result = loop.run_until_complete(
                         selenium_publisher_manager.publish_video(platform, video_info)
@@ -162,15 +173,18 @@ class SeleniumPublishWorker(QThread):
                     results[platform] = result
 
                     if result.get('success'):
-                        logger.info(f"Selenium发布到 {platform} 成功")
+                        logger.info(f"✅ Selenium发布到 {platform} 成功")
+                        progress_callback(f"✅ {platform} 发布成功", int(base_progress + 100/total_platforms))
                     else:
-                        logger.error(f"Selenium发布到 {platform} 失败: {result.get('error')}")
+                        logger.error(f"❌ Selenium发布到 {platform} 失败: {result.get('error')}")
+                        progress_callback(f"❌ {platform} 发布失败", int(base_progress + 100/total_platforms))
 
                 except Exception as e:
-                    logger.error(f"Selenium发布到 {platform} 异常: {e}")
+                    logger.error(f"💥 Selenium发布到 {platform} 异常: {e}")
                     results[platform] = {'success': False, 'error': str(e)}
+                    progress_callback(f"💥 {platform} 发布异常", int(base_progress + 100/total_platforms))
 
-            self.progress_updated.emit(1.0, "发布完成")
+            progress_callback("🎉 所有平台发布完成", 100)
             self.publish_completed.emit(results)
 
         except Exception as e:
@@ -554,6 +568,12 @@ class SimpleOneClickPublishTab(QWidget):
 
         # 初始化AI优化状态
         self._update_ai_button_state()
+
+        # 🔧 新增：加载项目发布内容
+        self.load_project_publish_content()
+
+        # 🔧 新增：自动检测项目视频文件
+        self.auto_detect_project_video()
         
     def create_publish_config_widget(self) -> QWidget:
         """创建发布配置部件"""
@@ -606,6 +626,28 @@ class SimpleOneClickPublishTab(QWidget):
             }
         """)
 
+        # 🔧 新增：刷新按钮（您要求的特征）
+        self.refresh_content_btn = QPushButton("🔄 刷新")
+        self.refresh_content_btn.clicked.connect(self.refresh_ai_content)
+        self.refresh_content_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px 15px;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 5px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+
         self.generate_cover_btn = QPushButton("🖼️ AI生成封面")
         self.generate_cover_btn.clicked.connect(self.generate_cover_image)
         self.generate_cover_btn.setStyleSheet("""
@@ -631,6 +673,7 @@ class SimpleOneClickPublishTab(QWidget):
         self.ai_status_label.setStyleSheet("color: #666; font-size: 12px; padding: 5px;")
 
         ai_button_row.addWidget(self.ai_optimize_button)
+        ai_button_row.addWidget(self.refresh_content_btn)  # 🔧 新增：刷新按钮
         ai_button_row.addWidget(self.generate_cover_btn)
         ai_button_row.addWidget(self.ai_status_label)
         ai_button_row.addStretch()
@@ -646,6 +689,8 @@ class SimpleOneClickPublishTab(QWidget):
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("AI将基于项目内容自动生成标题...")
         self.title_edit.setMinimumHeight(35)
+        # 🔧 新增：内容变化时自动保存
+        self.title_edit.textChanged.connect(self.save_publish_content)
         form_layout.addRow("📝 标题:", self.title_edit)
 
         # 描述
@@ -653,12 +698,16 @@ class SimpleOneClickPublishTab(QWidget):
         self.description_edit.setPlaceholderText("AI将基于项目内容自动生成描述...")
         self.description_edit.setMaximumHeight(120)
         self.description_edit.setMinimumHeight(80)
+        # 🔧 新增：内容变化时自动保存
+        self.description_edit.textChanged.connect(self.save_publish_content)
         form_layout.addRow("📄 描述:", self.description_edit)
 
         # 标签
         self.tags_edit = QLineEdit()
         self.tags_edit.setPlaceholderText("AI将自动生成适合的标签...")
         self.tags_edit.setMinimumHeight(35)
+        # 🔧 新增：内容变化时自动保存
+        self.tags_edit.textChanged.connect(self.save_publish_content)
         form_layout.addRow("🏷️ 标签:", self.tags_edit)
 
         # 封面
@@ -683,51 +732,39 @@ class SimpleOneClickPublishTab(QWidget):
         content_layout.addLayout(form_layout)
         layout.addWidget(content_group)
 
-        # 发布方式选择
-        method_group = QGroupBox("发布方式")
-        method_layout = QVBoxLayout(method_group)
-
-        self.publish_method_group = QButtonGroup()
-
-        # API发布（原有方式）
-        self.api_radio = QRadioButton("API发布 (推荐B站)")
-        self.api_radio.setChecked(True)
-        self.api_radio.setToolTip("使用平台API进行发布，稳定但支持平台有限")
-        self.publish_method_group.addButton(self.api_radio, 0)
-        method_layout.addWidget(self.api_radio)
-
-        # Selenium发布（新方案）
-        self.selenium_radio = QRadioButton("浏览器自动化发布 (支持抖音等)")
-        self.selenium_radio.setToolTip("基于MoneyPrinterPlus方案，支持更多平台，需要手动登录")
-        self.publish_method_group.addButton(self.selenium_radio, 1)
-        method_layout.addWidget(self.selenium_radio)
-
-        # 模拟模式选项
-        self.simulation_mode_checkbox = QCheckBox("启用模拟模式")
-        self.simulation_mode_checkbox.setChecked(False)  # 默认不启用
-        self.simulation_mode_checkbox.setToolTip("模拟模式仅用于测试，不会实际发布视频")
-        method_layout.addWidget(self.simulation_mode_checkbox)
-
-        # 添加说明文本
-        method_info = QLabel("""
-💡 发布方式说明:
-• API发布: 使用官方API，稳定可靠，目前支持B站
-• 浏览器自动化: 基于MoneyPrinterPlus方案，支持抖音、B站等更多平台
-  - 真实模式: 实际发布视频（默认）
-  - 模拟模式: 仅用于测试，不会实际发布视频
-
-🔧 抖音发布步骤:
-1. 运行 start_chrome_debug.bat 启动Chrome调试模式
-2. 在Chrome中手动登录抖音创作者平台
-3. 返回程序，选择抖音平台并点击发布
+        # 🔧 优化：平台选择区域
+        platform_group = QGroupBox("🎯 选择发布平台")
+        platform_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #FF9800;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                background-color: #fff8f0;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #FF9800;
+            }
+            QCheckBox {
+                font-size: 13px;
+                padding: 8px;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                border: 2px solid #ddd;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #4CAF50;
+                border: 2px solid #4CAF50;
+            }
         """)
-        method_info.setStyleSheet("color: #666; font-size: 11px; padding: 5px;")
-        method_layout.addWidget(method_info)
-
-        layout.addWidget(method_group)
-
-        # 平台选择
-        platform_group = QGroupBox("目标平台")
         platform_layout = QGridLayout(platform_group)
 
         self.platform_checkboxes = {}
@@ -767,6 +804,8 @@ class SimpleOneClickPublishTab(QWidget):
 
             if platform == 'bilibili':  # 默认选中B站
                 checkbox.setChecked(True)
+            # 🔧 新增：平台选择变化时自动保存
+            checkbox.stateChanged.connect(self.save_publish_content)
             self.platform_checkboxes[platform] = checkbox
             platform_layout.addWidget(checkbox, row, col)
 
@@ -777,45 +816,130 @@ class SimpleOneClickPublishTab(QWidget):
             
         layout.addWidget(platform_group)
         
-        # 发布按钮
-        button_layout = QHBoxLayout()
-        
-        self.publish_button = QPushButton("开始发布")
+        # 🔧 优化：发布按钮区域
+        button_group = QGroupBox()
+        button_group.setStyleSheet("""
+            QGroupBox {
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                background-color: #f9f9f9;
+            }
+        """)
+        button_layout = QHBoxLayout(button_group)
+
+        self.publish_button = QPushButton("🚀 一键发布")
         self.publish_button.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #4CAF50, stop:1 #45a049);
                 color: white;
                 border: none;
-                padding: 10px;
-                font-size: 14px;
+                padding: 15px 30px;
+                font-size: 16px;
                 font-weight: bold;
-                border-radius: 5px;
+                border-radius: 8px;
+                min-width: 200px;
+                min-height: 50px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #45a049, stop:1 #3d8b40);
+                transform: translateY(-2px);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #3d8b40, stop:1 #2e7d32);
             }
             QPushButton:disabled {
                 background-color: #cccccc;
+                color: #666666;
             }
         """)
         self.publish_button.clicked.connect(self.start_publish)
-        
-        self.cancel_button = QPushButton("取消发布")
+
+        self.cancel_button = QPushButton("❌ 取消发布")
         self.cancel_button.setEnabled(False)
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                padding: 12px 25px;
+                font-size: 14px;
+                font-weight: bold;
+                border-radius: 6px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
         self.cancel_button.clicked.connect(self.cancel_publish)
-        
+
+        button_layout.addStretch()
         button_layout.addWidget(self.publish_button)
         button_layout.addWidget(self.cancel_button)
-        layout.addLayout(button_layout)
+        button_layout.addStretch()
+
+        layout.addWidget(button_group)
         
-        # 进度条
+        # 🔧 优化：进度显示区域
+        progress_group = QGroupBox("📊 发布进度")
+        progress_group.setVisible(False)
+        progress_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #2196F3;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
+                background-color: #f3f8ff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                color: #2196F3;
+            }
+        """)
+        progress_layout = QVBoxLayout(progress_group)
+
+        self.progress_label = QLabel("准备发布...")
+        self.progress_label.setStyleSheet("""
+            QLabel {
+                color: #333;
+                font-size: 14px;
+                padding: 5px;
+            }
+        """)
+        progress_layout.addWidget(self.progress_label)
+
         self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
-        self.progress_label = QLabel()
-        self.progress_label.setVisible(False)
-        layout.addWidget(self.progress_label)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                text-align: center;
+                font-weight: bold;
+                background-color: #f0f0f0;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #4CAF50, stop:1 #2196F3);
+                border-radius: 6px;
+            }
+        """)
+        progress_layout.addWidget(self.progress_bar)
+
+        self.progress_group = progress_group  # 保存引用以便控制显示/隐藏
+        layout.addWidget(progress_group)
         
         return widget
         
@@ -918,50 +1042,39 @@ class SimpleOneClickPublishTab(QWidget):
                 QMessageBox.warning(self, "警告", "请至少选择一个发布平台")
                 return
                 
-            # 检查发布方式
-            use_selenium = self.selenium_radio.isChecked()
-
-            if not use_selenium:
-                # API发布方式 - 检查是否有对应的账号
-                missing_accounts = []
-                for platform in selected_platforms:
-                    accounts = self.publisher.get_platform_accounts(platform)
-                    if not accounts:
-                        missing_accounts.append(platform)
-
-                if missing_accounts:
-                    QMessageBox.warning(
-                        self, "警告",
-                        f"以下平台缺少账号配置：{', '.join(missing_accounts)}\n请先在账号管理中添加相应账号。"
-                    )
-                    return
-            else:
-                # Selenium发布方式 - 检查是否可用
-                if not SELENIUM_AVAILABLE:
-                    QMessageBox.critical(
-                        self, "错误",
-                        "Selenium发布器不可用，请检查依赖是否正确安装。"
-                    )
-                    return
-
-                # 提示用户准备浏览器
-                reply = QMessageBox.question(
-                    self, "浏览器自动化发布",
-                    """使用浏览器自动化发布需要：
-
-1. 启动Chrome调试模式：
-   chrome.exe --remote-debugging-port=9222 --user-data-dir=selenium
-
-2. 在浏览器中手动登录各个平台账号
-
-3. 保持浏览器开启状态
-
-是否已完成准备工作？""",
-                    QMessageBox.Yes | QMessageBox.No
+            # 🔧 简化：统一使用浏览器自动化发布
+            # 检查Selenium是否可用
+            if not SELENIUM_AVAILABLE:
+                QMessageBox.critical(
+                    self, "错误",
+                    "浏览器自动化发布器不可用，请检查依赖是否正确安装。"
                 )
+                return
 
-                if reply != QMessageBox.Yes:
-                    return
+            # 🔧 优化：Firefox浏览器准备提示
+            reply = QMessageBox.question(
+                self, "🦊 Firefox一键发布",
+                """🚀 Firefox一键发布准备：
+
+1. 确保Firefox浏览器已启动：
+   • 打开Firefox浏览器
+   • 无需特殊配置，直接使用
+
+2. 在Firefox中手动登录各个平台账号：
+   • 抖音创作者平台
+   • B站创作中心
+   • 其他选中的平台
+
+3. 保持Firefox浏览器开启状态
+
+✨ Firefox更简单：无需命令行启动，直接使用！
+
+是否已完成准备工作并开始发布？""",
+                QMessageBox.Yes | QMessageBox.No
+            )
+
+            if reply != QMessageBox.Yes:
+                return
                 
             # 创建视频元数据
             metadata = VideoMetadata(
@@ -970,44 +1083,37 @@ class SimpleOneClickPublishTab(QWidget):
                 tags=[tag.strip() for tag in self.tags_edit.text().split(',') if tag.strip()]
             )
 
-            # 根据发布方式创建工作线程
-            if use_selenium:
-                # 使用Selenium发布
-                simulation_mode = self.simulation_mode_checkbox.isChecked()
-                selenium_config = {
-                    'driver_type': 'chrome',
-                    'debugger_address': '127.0.0.1:9222',
-                    'timeout': 30,
-                    'headless': False,
-                    'simulation_mode': simulation_mode
+            # 🔧 优化：统一使用Firefox浏览器自动化发布
+            selenium_config = {
+                'driver_type': 'firefox',  # 使用Firefox
+                'timeout': 30,
+                'headless': False,
+                'simulation_mode': False,  # 默认真实发布
+                'firefox_profile': None,   # 使用默认配置文件
+                'firefox_options': {
+                    'user_friendly': True,  # 用户友好模式
+                    'auto_detect': True     # 自动检测已打开的Firefox
                 }
+            }
 
-                self.current_worker = SeleniumPublishWorker(
-                    video_path=self.video_path_edit.text().strip(),
-                    metadata=metadata,
-                    platforms=selected_platforms,
-                    config=selenium_config
-                )
-            else:
-                # 使用API发布
-                self.current_worker = SimplePublishWorker(
-                    publisher=self.publisher,
-                    video_path=self.video_path_edit.text().strip(),
-                    metadata=metadata,
-                    platforms=selected_platforms
-                )
+            self.current_worker = SeleniumPublishWorker(
+                video_path=self.video_path_edit.text().strip(),
+                metadata=metadata,
+                platforms=selected_platforms,
+                config=selenium_config
+            )
             
             # 连接信号
             self.current_worker.progress_updated.connect(self.on_progress_updated)
             self.current_worker.publish_completed.connect(self.on_publish_completed)
             self.current_worker.error_occurred.connect(self.on_publish_error)
             
-            # 更新UI状态
+            # 🔧 优化：更新UI状态
             self.publish_button.setEnabled(False)
             self.cancel_button.setEnabled(True)
-            self.progress_bar.setVisible(True)
-            self.progress_label.setVisible(True)
+            self.progress_group.setVisible(True)  # 显示整个进度组
             self.progress_bar.setValue(0)
+            self.progress_label.setText("🚀 开始发布...")
             
             # 启动线程
             self.current_worker.start()
@@ -1025,9 +1131,22 @@ class SimpleOneClickPublishTab(QWidget):
         self.reset_ui_state()
         
     def on_progress_updated(self, progress: float, message: str):
-        """进度更新"""
-        self.progress_bar.setValue(int(progress * 100))
-        self.progress_label.setText(message)
+        """🔧 修复问题3：进度更新"""
+        try:
+            # 确保进度值在有效范围内
+            progress_value = max(0, min(100, int(progress * 100)))
+            self.progress_bar.setValue(progress_value)
+            self.progress_label.setText(message)
+
+            # 记录进度日志
+            logger.info(f"📊 发布进度: {progress_value}% - {message}")
+
+            # 强制刷新UI
+            self.progress_bar.repaint()
+            self.progress_label.repaint()
+
+        except Exception as e:
+            logger.error(f"更新进度失败: {e}")
         
     def on_publish_completed(self, result: Dict[str, Any]):
         """发布完成"""
@@ -1052,11 +1171,10 @@ class SimpleOneClickPublishTab(QWidget):
         QMessageBox.critical(self, "发布错误", f"发布过程中出现错误:\n{error_message}")
         
     def reset_ui_state(self):
-        """重置UI状态"""
+        """🔧 优化：重置UI状态"""
         self.publish_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
-        self.progress_bar.setVisible(False)
-        self.progress_label.setVisible(False)
+        self.progress_group.setVisible(False)  # 隐藏整个进度组
         self.current_worker = None
 
     def load_platform_accounts(self):
@@ -1504,6 +1622,18 @@ class SimpleOneClickPublishTab(QWidget):
                 tags_text = ', '.join(optimized_content.tags[:10])
                 self.tags_edit.setText(tags_text)
 
+            # 🔧 新增：保存AI优化结果到项目
+            optimization_data = {
+                "title": optimized_content.title,
+                "description": optimized_content.description,
+                "tags": optimized_content.tags,
+                "hashtags": getattr(optimized_content, 'hashtags', []),
+                "keywords": getattr(optimized_content, 'keywords', []),
+                "platform_specific": getattr(optimized_content, 'platform_specific', {}),
+                "optimization_type": "ai_generated"
+            }
+            self.save_ai_optimization_result(optimization_data)
+
             # 显示优化结果对话框
             self.show_optimization_results(optimized_content)
 
@@ -1876,6 +2006,15 @@ class SimpleOneClickPublishTab(QWidget):
             self.description_edit.setPlainText(content.get('description', ''))
             self.tags_edit.setText(content.get('tags', ''))
 
+            # 🔧 新增：保存项目内容生成结果
+            optimization_data = {
+                "title": content.get('title', ''),
+                "description": content.get('description', ''),
+                "tags": content.get('tags', '').split(',') if content.get('tags') else [],
+                "optimization_type": "project_based"
+            }
+            self.save_ai_optimization_result(optimization_data)
+
             logger.info("✅ 基于项目数据的AI内容生成完成")
             QMessageBox.information(self, "成功", "基于项目数据的AI内容生成完成！")
 
@@ -1905,3 +2044,223 @@ class SimpleOneClickPublishTab(QWidget):
         except Exception as e:
             logger.debug(f"获取主窗口失败: {e}")
             return None
+
+    def save_publish_content(self):
+        """🔧 新增：保存发布内容到项目"""
+        try:
+            # 获取项目管理器
+            main_window = self.get_main_window()
+            if not main_window or not hasattr(main_window, 'project_manager'):
+                return
+
+            project_manager = main_window.project_manager
+            if not project_manager or not project_manager.current_project:
+                return
+
+            # 获取当前内容
+            title = self.title_edit.text().strip()
+            description = self.description_edit.toPlainText().strip()
+            tags = self.tags_edit.text().strip()
+
+            # 获取选中的平台
+            selected_platforms = []
+            for platform, checkbox in self.platform_checkboxes.items():
+                if checkbox.isChecked():
+                    selected_platforms.append(platform)
+
+            # 保存到项目
+            project_manager.save_publish_content(
+                title=title,
+                description=description,
+                tags=tags,
+                selected_platforms=selected_platforms
+            )
+
+        except Exception as e:
+            logger.debug(f"保存发布内容失败: {e}")  # 使用debug级别，避免频繁日志
+
+    def load_project_publish_content(self):
+        """🔧 新增：从项目加载发布内容"""
+        try:
+            # 获取项目管理器
+            main_window = self.get_main_window()
+            if not main_window or not hasattr(main_window, 'project_manager'):
+                return
+
+            project_manager = main_window.project_manager
+            if not project_manager or not project_manager.current_project:
+                return
+
+            # 获取发布内容
+            publish_content = project_manager.get_publish_content()
+
+            # 临时断开信号连接，避免触发保存
+            self.title_edit.textChanged.disconnect()
+            self.description_edit.textChanged.disconnect()
+            self.tags_edit.textChanged.disconnect()
+
+            try:
+                # 加载内容到界面
+                if publish_content.get("title"):
+                    self.title_edit.setText(publish_content["title"])
+
+                if publish_content.get("description"):
+                    self.description_edit.setPlainText(publish_content["description"])
+
+                if publish_content.get("tags"):
+                    self.tags_edit.setText(publish_content["tags"])
+
+                # 恢复选中的平台
+                selected_platforms = publish_content.get("selected_platforms", [])
+                for platform, checkbox in self.platform_checkboxes.items():
+                    checkbox.setChecked(platform in selected_platforms)
+
+                # 显示加载信息
+                if any([publish_content.get("title"), publish_content.get("description"), publish_content.get("tags")]):
+                    last_time = publish_content.get("last_generated_time", "")
+                    if last_time:
+                        from datetime import datetime
+                        try:
+                            dt = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
+                            time_str = dt.strftime("%m-%d %H:%M")
+                            logger.info(f"✅ 已加载项目发布内容 (最后更新: {time_str})")
+                        except:
+                            logger.info("✅ 已加载项目发布内容")
+                    else:
+                        logger.info("✅ 已加载项目发布内容")
+
+            finally:
+                # 重新连接信号
+                self.title_edit.textChanged.connect(self.save_publish_content)
+                self.description_edit.textChanged.connect(self.save_publish_content)
+                self.tags_edit.textChanged.connect(self.save_publish_content)
+
+        except Exception as e:
+            logger.error(f"加载项目发布内容失败: {e}")
+
+    def save_ai_optimization_result(self, optimization_data: dict):
+        """🔧 新增：保存AI优化结果到项目历史"""
+        try:
+            # 获取项目管理器
+            main_window = self.get_main_window()
+            if not main_window or not hasattr(main_window, 'project_manager'):
+                return
+
+            project_manager = main_window.project_manager
+            if not project_manager or not project_manager.current_project:
+                return
+
+            # 保存AI优化历史
+            project_manager.add_ai_optimization_history(optimization_data)
+            logger.info("✅ AI优化结果已保存到项目历史")
+
+        except Exception as e:
+            logger.error(f"保存AI优化结果失败: {e}")
+
+    def auto_detect_project_video(self):
+        """🔧 新增：自动检测项目视频文件"""
+        try:
+            # 获取项目管理器
+            main_window = self.get_main_window()
+            if not main_window or not hasattr(main_window, 'project_manager'):
+                return
+
+            project_manager = main_window.project_manager
+            if not project_manager or not project_manager.current_project:
+                return
+
+            # 获取项目路径
+            project_path = project_manager.current_project.get('project_path', '')
+            if not project_path or not os.path.exists(project_path):
+                return
+
+            # 查找项目中的final_video.mp4
+            video_candidates = [
+                os.path.join(project_path, 'final_video.mp4'),
+                os.path.join(project_path, 'output.mp4'),
+                os.path.join(project_path, 'video.mp4')
+            ]
+
+            # 也检查videos子目录
+            videos_dir = os.path.join(project_path, 'videos')
+            if os.path.exists(videos_dir):
+                for file in os.listdir(videos_dir):
+                    if file.endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                        video_candidates.append(os.path.join(videos_dir, file))
+
+            # 查找存在的视频文件
+            for video_path in video_candidates:
+                if os.path.exists(video_path):
+                    # 检查当前是否已经设置了视频路径
+                    current_path = self.video_path_edit.text().strip()
+                    if not current_path or not os.path.exists(current_path):
+                        self.video_path_edit.setText(video_path)
+                        logger.info(f"✅ 自动检测到项目视频: {video_path}")
+                        return
+
+            logger.debug("未找到项目视频文件")
+
+        except Exception as e:
+            logger.debug(f"自动检测项目视频失败: {e}")
+
+    def get_project_video_info(self) -> dict:
+        """🔧 新增：获取项目视频信息，用于调试"""
+        try:
+            # 获取项目管理器
+            main_window = self.get_main_window()
+            if not main_window or not hasattr(main_window, 'project_manager'):
+                return {}
+
+            project_manager = main_window.project_manager
+            if not project_manager or not project_manager.current_project:
+                return {}
+
+            project_path = project_manager.current_project.get('project_path', '')
+            if not project_path:
+                return {}
+
+            info = {
+                'project_path': project_path,
+                'project_exists': os.path.exists(project_path),
+                'video_files': []
+            }
+
+            if os.path.exists(project_path):
+                # 列出项目目录中的所有视频文件
+                for root, dirs, files in os.walk(project_path):
+                    for file in files:
+                        if file.endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv')):
+                            full_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(full_path, project_path)
+                            info['video_files'].append({
+                                'name': file,
+                                'relative_path': rel_path,
+                                'full_path': full_path,
+                                'exists': os.path.exists(full_path),
+                                'size': os.path.getsize(full_path) if os.path.exists(full_path) else 0
+                            })
+
+            return info
+
+        except Exception as e:
+            logger.error(f"获取项目视频信息失败: {e}")
+            return {}
+
+    def refresh_ai_content(self):
+        """🔄 刷新AI内容 - 您要求的刷新功能"""
+        try:
+            logger.info("🔄 开始刷新AI内容...")
+
+            # 清空当前内容
+            self.title_edit.clear()
+            self.description_edit.clear()
+            self.tags_edit.clear()
+
+            # 重新生成AI内容
+            self.optimize_content_with_ai()
+
+            logger.info("✅ AI内容刷新完成")
+
+        except Exception as e:
+            logger.error(f"刷新AI内容失败: {e}")
+            QMessageBox.warning(self, "刷新失败", f"刷新AI内容时出现错误:\n{e}")

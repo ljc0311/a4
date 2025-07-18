@@ -28,7 +28,7 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
         return "https://creator.douyin.com/creator-micro/content/upload"
         
     async def _check_login_status(self) -> bool:
-        """检查抖音登录状态 - 参考MoneyPrinterPlus的简化稳定实现"""
+        """🔧 优化：检查抖音登录状态，修复逻辑问题"""
         try:
             # 等待页面加载完成
             await asyncio.sleep(2)
@@ -60,109 +60,82 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
                 logger.warning("❌ 不在抖音域名下")
                 return False
 
-            # 4. 参考MoneyPrinterPlus的简化方法 - 检查明显的登录按钮
-            obvious_login_selectors = [
-                '//button[contains(text(), "登录")]',
-                '//a[contains(text(), "登录")]',
-                '//div[contains(text(), "请登录")]',
-                '//span[contains(text(), "登录")]'
-            ]
+            # 🔧 修复问题1：如果已经在上传页面，直接检查上传元素
+            upload_url = "https://creator.douyin.com/creator-micro/content/upload"
+            if upload_url in current_url:
+                logger.info("📍 已在视频上传页面")
 
-            # 如果找到明显的登录按钮，说明未登录
-            for selector in obvious_login_selectors:
-                element = self.find_element_safe(By.XPATH, selector, timeout=0.5)
-                if element and element.is_displayed():
-                    logger.warning(f"❌ 发现登录按钮: {selector}")
-                    return False
-
-            # 5. MoneyPrinterPlus风格的简化检测 - 如果在创作者中心且没有登录按钮，就认为已登录
-            if 'creator.douyin.com' in current_url:
-                logger.info("📍 在抖音创作者中心页面")
-
-                # 参考MoneyPrinterPlus的简化方法：检查关键的成功指示器
-                success_indicators = [
-                    # 文件上传元素 - 最可靠的登录指示器
-                    '//input[@type="file"]',
-
-                    # 发布按钮
-                    '//button[contains(text(), "发布")]',
-
-                    # 标题输入框
-                    '//input[contains(@placeholder, "标题")]',
-
-                    # 简介输入框
-                    '//div[@data-placeholder="添加作品简介"]',
-
-                    # 上传区域
-                    '//div[contains(@class, "upload")]'
+                # 直接检查上传页面的关键元素
+                upload_indicators = [
+                    '//input[@type="file"]',  # 文件上传输入
+                    '//div[contains(@class, "upload")]',  # 上传区域
+                    '//input[contains(@placeholder, "标题")]',  # 标题输入框
                 ]
 
-                # 检查成功指示器
-                found_count = 0
-                for selector in success_indicators:
-                    element = self.find_element_safe(By.XPATH, selector, timeout=1)
+                for selector in upload_indicators:
+                    element = self.find_element_safe(By.XPATH, selector, timeout=2)
                     if element:
-                        found_count += 1
-                        logger.info(f"✅ 找到成功指示器: {selector}")
-
-                # 如果找到任何成功指示器，认为已登录
-                if found_count > 0:
-                    logger.info(f"🎉 登录检测成功！找到 {found_count} 个成功指示器")
-                    return True
-
-                # 备用检测：检查页面文本内容
-                try:
-                    page_source = self.driver.page_source
-                    success_keywords = ['内容发布', '上传视频', '发布', '标题', '简介']
-                    found_keywords = [kw for kw in success_keywords if kw in page_source]
-
-                    if found_keywords:
-                        logger.info(f"✅ 通过页面内容检测到登录状态: {found_keywords}")
+                        logger.info(f"✅ 在上传页面找到关键元素: {selector}")
                         return True
 
+                # 如果在上传页面但找不到关键元素，可能需要登录
+                logger.warning("⚠️ 在上传页面但未找到关键元素，可能需要登录")
+                return False
+
+            # 4. 🔧 修复问题1：如果在其他创作者页面，跳转到上传页面
+            if 'creator.douyin.com' in current_url:
+                logger.info("📍 在抖音创作者中心，准备跳转到上传页面")
+
+                # 🔧 修复问题2：不再查找登录按钮，直接跳转
+                try:
+                    logger.info(f"🔄 跳转到上传页面: {upload_url}")
+                    self.driver.get(upload_url)
+                    await asyncio.sleep(3)
+
+                    # 检查跳转后的页面
+                    new_url = self.driver.current_url
+                    if upload_url in new_url:
+                        logger.info("✅ 成功跳转到上传页面")
+
+                        # 检查上传页面元素
+                        upload_element = self.find_element_safe(By.XPATH, '//input[@type="file"]', timeout=5)
+                        if upload_element:
+                            logger.info("✅ 上传页面加载成功，用户已登录")
+                            return True
+                        else:
+                            logger.warning("❌ 上传页面加载失败，可能需要登录")
+                            return False
+                    else:
+                        logger.warning(f"❌ 跳转失败，当前页面: {new_url}")
+                        return False
+
                 except Exception as e:
-                    logger.debug(f"页面内容检测失败: {e}")
+                    logger.error(f"跳转到上传页面失败: {e}")
+                    return False
 
-                # MoneyPrinterPlus风格的最终检测：如果在创作者中心且没有明显登录提示，认为已登录
-                logger.warning("🔄 使用MoneyPrinterPlus风格的最终检测...")
-
-                # 再次检查是否有登录相关元素
-                final_login_check = [
-                    '//button[contains(text(), "登录")]',
-                    '//a[contains(text(), "登录")]',
-                    '//div[contains(text(), "请登录")]'
-                ]
-
-                has_login_element = False
-                for selector in final_login_check:
-                    element = self.find_element_safe(By.XPATH, selector, timeout=0.5)
-                    if element and element.is_displayed():
-                        logger.warning(f"❌ 最终检测发现登录元素: {selector}")
-                        has_login_element = True
-                        break
-
-                if not has_login_element:
-                    logger.info("✅ MoneyPrinterPlus风格检测：在创作者中心且无登录元素，认为已登录")
-                    return True
-
-            # 6. 如果在其他抖音页面，进行基本检测
+            # 5. 如果在其他抖音页面，尝试跳转到创作者中心
             elif 'douyin.com' in current_url:
-                logger.info("📍 在抖音其他页面")
-                # 简单检查：如果没有明显的登录按钮，认为已登录
-                login_btn = self.find_element_safe(By.XPATH, '//button[contains(text(), "登录")]', timeout=1)
-                if not login_btn:
-                    logger.info("✅ 在抖音页面且无登录按钮，认为已登录")
-                    return True
+                logger.info("📍 在抖音其他页面，尝试跳转到创作者中心")
+                try:
+                    self.driver.get("https://creator.douyin.com/")
+                    await asyncio.sleep(3)
 
-            logger.warning("❌ 所有登录检测方法都失败")
+                    # 递归检查登录状态
+                    return await self._check_login_status()
+
+                except Exception as e:
+                    logger.error(f"跳转到创作者中心失败: {e}")
+                    return False
+
+            logger.warning("❌ 不在抖音相关页面")
             return False
-            
+
         except Exception as e:
             logger.error(f"检查登录状态失败: {e}")
             return False
             
     async def _publish_video_impl(self, video_info: Dict[str, Any]) -> Dict[str, Any]:
-        """抖音视频发布实现"""
+        """🔧 修复：抖音视频发布实现，调整流程顺序"""
         try:
             # 检查是否为模拟模式
             if self.selenium_config.get('simulation_mode', False):
@@ -173,9 +146,9 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
                 description = video_info.get('description', '')
                 video_path = video_info.get('video_path', '')
 
-                logger.info(f"📹 模拟上传视频: {video_path}")
                 logger.info(f"📝 模拟设置标题: {title}")
                 logger.info(f"📄 模拟设置描述: {description}")
+                logger.info(f"📹 模拟上传视频: {video_path}")
                 logger.info("⏳ 模拟等待上传完成...")
 
                 # 模拟等待时间
@@ -190,8 +163,19 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             if self.driver.current_url != upload_url:
                 self.driver.get(upload_url)
                 time.sleep(3)
-                
-            # 1. 上传视频文件 - 参考MoneyPrinterPlus的稳定上传逻辑
+
+            # 🔧 修复问题3：添加进度回调
+            progress_callback = video_info.get('progress_callback')
+            if progress_callback:
+                progress_callback("准备发布视频...", 10)
+
+            # 🔧 修复：正确的抖音发布流程顺序
+            # 根据抖音界面实际情况：必须先上传视频文件，然后才会跳转到填写标题、描述的界面
+
+            # 1. 上传视频文件
+            if progress_callback:
+                progress_callback("准备上传视频文件...", 15)
+
             video_path = video_info.get('video_path')
             if not video_path:
                 return {'success': False, 'error': '视频路径不能为空'}
@@ -207,34 +191,54 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             ]
 
             upload_success = False
-            for selector in file_input_selectors:
+            for i, selector in enumerate(file_input_selectors):
                 logger.info(f"尝试使用选择器上传: {selector}")
+                if progress_callback:
+                    progress_callback(f"尝试上传方式 {i+1}/{len(file_input_selectors)}", 20 + i * 5)
+
                 if self.upload_file_safe(By.XPATH, selector, video_path, timeout=10):
                     upload_success = True
                     logger.info("✅ 视频文件上传成功")
+                    if progress_callback:
+                        progress_callback("视频文件上传成功", 35)
                     break
                 time.sleep(1)
 
             if not upload_success:
+                if progress_callback:
+                    progress_callback("视频上传失败", 0)
                 return {'success': False, 'error': '视频上传失败 - 未找到有效的上传元素'}
 
-            # 智能等待视频上传完成 - 参考MoneyPrinterPlus的等待策略
+            # 🔧 修复：等待视频上传完成，重点检测手机预览
             logger.info("等待视频上传完成...")
-            upload_complete = self._wait_for_upload_complete(timeout=300)  # 5分钟超时
+            if progress_callback:
+                progress_callback("等待视频上传完成...", 40)
+
+            upload_complete = self._wait_for_upload_complete_enhanced(timeout=300, progress_callback=progress_callback)  # 5分钟超时
 
             if not upload_complete:
+                if progress_callback:
+                    progress_callback("视频上传超时", 0)
                 return {'success': False, 'error': '视频上传超时或失败'}
-            
+
             # 2. 设置视频标题
+            if progress_callback:
+                progress_callback("设置视频标题...", 75)
+
             title = video_info.get('title', '')
             if title:
                 logger.info(f"设置标题: {title}")
                 title_selector = '//input[@class="semi-input semi-input-default"]'
                 if not self.send_keys_safe(By.XPATH, title_selector, title[:30]):  # 抖音标题限制30字
                     logger.warning("标题设置失败")
+                else:
+                    logger.info("✅ 标题设置成功")
                 time.sleep(2)
-                
+
             # 3. 设置视频描述（增强版）
+            if progress_callback:
+                progress_callback("设置视频描述...", 80)
+
             description = video_info.get('description', '')
             if description:
                 logger.info("设置视频描述...")
@@ -248,6 +252,9 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             tags = video_info.get('tags', [])
             if tags and isinstance(tags, list):
                 logger.info(f"标签已包含在描述中: {tags}")
+
+            if progress_callback:
+                progress_callback("准备发布视频...", 85)
                 # 标签已经通过描述设置，这里不再单独设置
                 logger.info("✅ 标签通过描述设置完成")
                         
@@ -280,6 +287,8 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             auto_publish = video_info.get('auto_publish', True)  # 默认启用自动发布
 
             logger.info("开始自动发布视频...")
+            if progress_callback:
+                progress_callback("查找发布按钮...", 85)
 
             # 等待页面稳定
             time.sleep(2)
@@ -290,28 +299,45 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             if publish_success:
                 # 等待发布完成
                 logger.info("发布按钮点击成功，等待发布完成...")
+                if progress_callback:
+                    progress_callback("发布按钮已点击，等待发布完成...", 90)
+
                 time.sleep(5)  # 增加等待时间确保发布完成
 
                 # 🔧 处理可能的错误弹窗
                 self._handle_error_dialogs()
 
-                # 检查发布结果
-                if self._check_publish_result():
+                # 🔧 修复问题4：检查发布结果
+                if progress_callback:
+                    progress_callback("检查发布结果...", 95)
+
+                publish_result = self._check_publish_result()
+                if publish_result['success']:
                     logger.info("✅ 视频发布成功！")
-                    return {'success': True, 'message': '视频发布成功'}
+                    if progress_callback:
+                        progress_callback("视频发布成功！", 100)
+                    return {'success': True, 'message': publish_result['message']}
                 else:
                     logger.info("✅ 视频已提交发布，请稍后查看发布状态")
-                    return {'success': True, 'message': '视频已提交发布'}
+                    if progress_callback:
+                        progress_callback("视频已提交发布", 100)
+                    return {'success': True, 'message': '视频已提交发布，请稍后查看发布状态'}
             else:
                 logger.warning("❌ 自动发布失败，尝试备用方案...")
+                if progress_callback:
+                    progress_callback("尝试备用发布方案...", 87)
 
                 # 备用方案：尝试更激进的发布按钮检测
                 backup_success = self._backup_publish_attempt()
                 if backup_success:
                     logger.info("✅ 备用发布方案成功！")
+                    if progress_callback:
+                        progress_callback("备用发布方案成功！", 100)
                     return {'success': True, 'message': '视频发布成功（备用方案）'}
                 else:
                     logger.error("❌ 所有自动发布方案都失败")
+                    if progress_callback:
+                        progress_callback("发布失败", 0)
                     return {'success': False, 'error': '自动发布失败，请检查页面状态'}
                 
         except Exception as e:
@@ -319,96 +345,158 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             return {'success': False, 'error': str(e)}
 
     def _smart_find_publish_button(self) -> bool:
-        """智能查找并点击发布按钮"""
+        """🔧 修复：智能查找并点击发布按钮，增强检测逻辑"""
         try:
             logger.info("开始智能检测发布按钮...")
 
-            # 第一轮：使用MoneyPrinterPlus验证过的选择器 - 按优先级排序
+            # 等待页面稳定
+            time.sleep(2)
+
+            # 第一轮：使用最精确的发布按钮选择器
             primary_selectors = [
-                # 最常用的发布按钮选择器（MoneyPrinterPlus验证有效）
+                # 抖音创作者中心最常用的发布按钮选择器
                 '//button[text()="发布"]',
                 '//button[contains(text(), "发布") and contains(@class, "semi-button-primary")]',
                 '//button[contains(@class, "semi-button-primary") and contains(text(), "发布")]',
+                '//button[@class="semi-button semi-button-primary semi-button-size-large semi-button-block"]',
 
-                # 备用选择器
+                # 备用精确选择器
                 '//button[contains(text(), "发布")]',
                 '//span[text()="发布"]/parent::button',
                 '//div[text()="发布"]/parent::button',
 
-                # 更通用的选择器
-                '//button[contains(@class, "publish")]',
-                '//button[contains(@class, "semi-button-primary")]'
+                # 通过按钮位置和样式查找
+                '//div[contains(@class, "publish")]//button[contains(@class, "primary")]',
+                '//div[contains(@class, "footer")]//button[contains(text(), "发布")]',
+                '//div[contains(@class, "bottom")]//button[contains(text(), "发布")]'
             ]
 
             for i, selector in enumerate(primary_selectors):
                 logger.info(f"尝试主要选择器 {i+1}/{len(primary_selectors)}: {selector}")
-                element = self.find_element_safe(By.XPATH, selector, timeout=5)
-                if element and element.is_enabled() and element.is_displayed():
+                element = self.find_element_safe(By.XPATH, selector, timeout=3)
+                if element:
                     try:
-                        # 滚动到元素可见位置
-                        self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
-                        time.sleep(1)
+                        # 检查元素是否真正可用
+                        if element.is_enabled() and element.is_displayed():
+                            # 滚动到元素可见位置
+                            self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
+                            time.sleep(1)
 
-                        # 先尝试普通点击
-                        element.click()
-                        logger.info(f"发布按钮点击成功: {selector}")
-                        return True
+                            # 高亮元素便于调试
+                            self.driver.execute_script("arguments[0].style.border='3px solid red';", element)
+                            time.sleep(0.5)
+
+                            # 先尝试普通点击
+                            element.click()
+                            logger.info(f"✅ 发布按钮点击成功: {selector}")
+                            return True
+                        else:
+                            logger.info(f"按钮不可用或不可见: enabled={element.is_enabled()}, displayed={element.is_displayed()}")
                     except Exception as e:
                         try:
                             # 如果普通点击失败，尝试JavaScript点击
                             self.driver.execute_script("arguments[0].click();", element)
-                            logger.info(f"发布按钮JavaScript点击成功: {selector}")
+                            logger.info(f"✅ 发布按钮JavaScript点击成功: {selector}")
                             return True
                         except Exception as e2:
                             logger.debug(f"JavaScript点击也失败: {e2}")
                             continue
+                else:
+                    logger.debug(f"未找到元素: {selector}")
 
-            # 第二轮：查找所有可能的按钮并检查文本和样式
-            logger.info("尝试查找所有按钮元素...")
+            # 第二轮：智能查找所有按钮并分析
+            logger.info("第二轮：智能分析所有按钮元素...")
             all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            logger.info(f"页面上共找到 {len(all_buttons)} 个按钮")
 
+            # 按优先级排序按钮
+            publish_buttons = []
             for button in all_buttons:
                 try:
                     if button.is_displayed() and button.is_enabled():
                         button_text = button.text.strip()
-                        if button_text in ["发布", "立即发布", "确认发布", "提交"]:
-                            # 检查按钮样式，优先选择红色/主要样式的按钮
-                            button_style = button.get_attribute("style") or ""
-                            button_class = button.get_attribute("class") or ""
+                        button_class = button.get_attribute("class") or ""
 
-                            logger.info(f"找到发布按钮，文本: {button_text}, 样式: {button_class}")
+                        # 检查是否是发布相关按钮
+                        if any(keyword in button_text for keyword in ["发布", "立即发布", "确认发布", "提交", "完成"]):
+                            priority = 0
 
-                            # 使用JavaScript点击，更可靠
-                            self.driver.execute_script("arguments[0].click();", button)
-                            logger.info("使用JavaScript点击发布按钮成功")
-                            return True
+                            # 计算优先级
+                            if "发布" in button_text:
+                                priority += 10
+                            if "primary" in button_class:
+                                priority += 5
+                            if "semi-button-primary" in button_class:
+                                priority += 8
+                            if button_text == "发布":
+                                priority += 15
+
+                            publish_buttons.append((priority, button, button_text, button_class))
+                            logger.info(f"发现发布按钮候选: 文本='{button_text}', 类名='{button_class}', 优先级={priority}")
+
                 except Exception as e:
-                    logger.debug(f"按钮点击失败: {e}")
+                    logger.debug(f"分析按钮失败: {e}")
                     continue
 
-            # 第三轮：查找包含发布文本的所有元素
-            logger.info("尝试查找包含发布文本的可点击元素...")
-            publish_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), '发布')]")
+            # 按优先级排序并尝试点击
+            publish_buttons.sort(key=lambda x: x[0], reverse=True)
 
-            for element in publish_elements:
+            for priority, button, text, classes in publish_buttons:
                 try:
-                    if element.is_displayed() and element.is_enabled():
-                        # 检查是否是可点击的元素
-                        tag_name = element.tag_name.lower()
-                        if tag_name in ['button', 'a', 'div', 'span']:
-                            logger.info(f"尝试点击发布元素: {tag_name} - {element.text}")
-                            element.click()
-                            return True
+                    logger.info(f"尝试点击高优先级发布按钮: '{text}' (优先级: {priority})")
+
+                    # 滚动到按钮位置
+                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", button)
+                    time.sleep(1)
+
+                    # 高亮按钮
+                    self.driver.execute_script("arguments[0].style.border='3px solid green';", button)
+                    time.sleep(0.5)
+
+                    # 使用JavaScript点击，更可靠
+                    self.driver.execute_script("arguments[0].click();", button)
+                    logger.info(f"✅ 发布按钮点击成功: '{text}'")
+                    return True
+
                 except Exception as e:
+                    logger.debug(f"点击按钮失败: {e}")
                     continue
 
-            # 第四轮：调试信息 - 列出页面上所有按钮
-            logger.info("调试：列出页面上所有按钮元素...")
-            try:
-                all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
-                logger.info(f"页面上共找到 {len(all_buttons)} 个按钮")
+            # 第三轮：查找包含发布文本的所有可点击元素
+            logger.info("第三轮：查找包含发布文本的可点击元素...")
+            publish_text_selectors = [
+                "//*[text()='发布']",
+                "//*[contains(text(), '发布')]",
+                "//*[text()='立即发布']",
+                "//*[text()='确认发布']"
+            ]
 
-                for i, button in enumerate(all_buttons[:10]):  # 只显示前10个
+            for selector in publish_text_selectors:
+                elements = self.driver.find_elements(By.XPATH, selector)
+                for element in elements:
+                    try:
+                        if element.is_displayed() and element.is_enabled():
+                            tag_name = element.tag_name.lower()
+                            if tag_name in ['button', 'a', 'div', 'span']:
+                                logger.info(f"尝试点击发布元素: {tag_name} - '{element.text}'")
+                                self.driver.execute_script("arguments[0].click();", element)
+                                logger.info(f"✅ 发布元素点击成功")
+                                return True
+                    except Exception as e:
+                        logger.debug(f"点击发布元素失败: {e}")
+                        continue
+
+            # 调试信息：显示页面状态
+            logger.warning("⚠️ 未找到可用的发布按钮，显示调试信息...")
+            try:
+                # 显示当前页面URL
+                logger.info(f"当前页面URL: {self.driver.current_url}")
+
+                # 显示页面标题
+                logger.info(f"页面标题: {self.driver.title}")
+
+                # 显示前10个按钮的详细信息
+                for i, button in enumerate(all_buttons[:10]):
                     try:
                         text = button.text.strip()
                         classes = button.get_attribute("class")
@@ -417,10 +505,11 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
                         logger.info(f"按钮 {i+1}: 文本='{text}', 类名='{classes}', 可用={enabled}, 可见={displayed}")
                     except:
                         continue
+
             except Exception as e:
                 logger.debug(f"调试信息获取失败: {e}")
 
-            logger.warning("未找到可用的发布按钮")
+            logger.error("❌ 未找到可用的发布按钮")
             return False
 
         except Exception as e:
@@ -502,98 +591,210 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             logger.error(f"备用发布方案失败: {e}")
             return False
 
-    def _check_publish_result(self) -> bool:
-        """检查发布结果"""
+    def _check_publish_result(self) -> dict:
+        """🔧 修复问题4：检查发布结果，返回详细信息"""
         try:
+            logger.info("开始检查发布结果...")
+
+            # 等待页面响应
+            time.sleep(3)
+
             # 检查URL变化
             current_url = self.driver.current_url
-            if 'upload' not in current_url:
-                logger.info("URL已变化，可能发布成功")
-                return True
+            logger.info(f"当前页面URL: {current_url}")
 
-            # 检查成功提示
+            # 1. 检查是否跳转到成功页面
+            success_urls = [
+                'creator-micro/content/manage',  # 内容管理页面
+                'creator-micro/home',  # 创作者首页
+                'success',  # 成功页面
+                'published'  # 已发布页面
+            ]
+
+            for success_url in success_urls:
+                if success_url in current_url:
+                    logger.info(f"✅ 检测到成功页面URL: {success_url}")
+                    return {'success': True, 'message': f'发布成功，已跳转到{success_url}页面'}
+
+            # 2. 检查成功提示文本
             success_indicators = [
                 "发布成功",
                 "提交成功",
                 "上传成功",
                 "发布中",
-                "审核中"
+                "审核中",
+                "等待审核",
+                "已发布",
+                "发布完成"
             ]
 
+            page_source = self.driver.page_source
             for indicator in success_indicators:
+                if indicator in page_source:
+                    logger.info(f"✅ 在页面内容中找到成功指示器: {indicator}")
+                    return {'success': True, 'message': f'发布成功: {indicator}'}
+
+                # 也检查元素
                 elements = self.driver.find_elements(By.XPATH, f"//*[contains(text(), '{indicator}')]")
                 if elements:
-                    logger.info(f"找到成功指示器: {indicator}")
-                    return True
+                    logger.info(f"✅ 找到成功指示器元素: {indicator}")
+                    return {'success': True, 'message': f'发布成功: {indicator}'}
 
-            # 检查是否还在上传页面（如果不在，可能是发布成功了）
+            # 3. 检查是否还在上传页面
             upload_indicators = [
                 '//input[@type="file"]',
-                '//div[@data-placeholder="添加作品简介"]'
+                '//div[@data-placeholder="添加作品简介"]',
+                '//button[contains(text(), "发布")]'
             ]
 
             still_on_upload = False
             for selector in upload_indicators:
                 if self.find_element_safe(By.XPATH, selector, timeout=1):
                     still_on_upload = True
+                    logger.info(f"仍在上传页面，找到元素: {selector}")
                     break
 
             if not still_on_upload:
-                logger.info("已离开上传页面，可能发布成功")
-                return True
+                logger.info("✅ 已离开上传页面，发布可能成功")
+                return {'success': True, 'message': '已离开上传页面，发布可能成功'}
 
-            return False
+            # 4. 检查错误信息
+            error_indicators = [
+                "发布失败",
+                "上传失败",
+                "网络错误",
+                "格式不支持",
+                "文件过大",
+                "审核不通过"
+            ]
+
+            for error in error_indicators:
+                if error in page_source:
+                    logger.warning(f"❌ 发现错误指示器: {error}")
+                    return {'success': False, 'message': f'发布失败: {error}'}
+
+            # 5. 默认情况：无法确定结果
+            logger.info("⚠️ 无法确定发布结果，可能仍在处理中")
+            return {'success': False, 'message': '无法确定发布结果，请手动检查'}
 
         except Exception as e:
-            logger.debug(f"检查发布结果失败: {e}")
-            return False
+            logger.error(f"检查发布结果失败: {e}")
+            return {'success': False, 'message': f'检查发布结果失败: {e}'}
 
-    def _wait_for_upload_complete(self, timeout: int = 300) -> bool:
-        """智能等待视频上传完成 - 参考MoneyPrinterPlus的实现"""
+    def _wait_for_upload_complete_enhanced(self, timeout: int = 300, progress_callback=None) -> bool:
+        """🔧 修复：增强版上传完成检测，重点检测手机预览中的视频内容"""
         try:
-            logger.info("开始智能等待视频上传完成...")
+            logger.info("开始增强版上传完成检测...")
             start_time = time.time()
+            last_progress_update = 0
 
             while time.time() - start_time < timeout:
                 try:
-                    # 检查上传进度指示器
-                    progress_indicators = [
-                        '//div[contains(@class, "progress")]',
-                        '//div[contains(text(), "上传中")]',
-                        '//div[contains(text(), "处理中")]',
-                        '//div[contains(text(), "%")]',
-                        '//div[contains(@class, "uploading")]'
+                    elapsed_time = time.time() - start_time
+                    progress_percent = min(40 + (elapsed_time / timeout) * 30, 70)  # 40%-70%
+
+                    # 更新进度回调
+                    if progress_callback and progress_percent - last_progress_update >= 5:
+                        progress_callback(f"检测上传状态... ({int(elapsed_time)}s)", int(progress_percent))
+                        last_progress_update = progress_percent
+
+                    # 🔧 修复：重点检测右侧手机预览中的视频内容
+                    # 当手机预览显示视频内容时，说明上传已完成
+                    mobile_preview_selectors = [
+                        # 手机预览区域的视频元素
+                        '//div[contains(@class, "phone-preview")]//video',
+                        '//div[contains(@class, "mobile-preview")]//video',
+                        '//div[contains(@class, "preview-phone")]//video',
+                        '//div[contains(@class, "phone")]//video',
+                        # 手机预览区域的canvas元素（视频渲染）
+                        '//div[contains(@class, "phone-preview")]//canvas',
+                        '//div[contains(@class, "mobile-preview")]//canvas',
+                        '//div[contains(@class, "phone")]//canvas',
+                        # 通用视频预览元素
+                        '//video[contains(@class, "preview")]',
+                        '//canvas[contains(@class, "preview")]',
+                        # 抖音特有的预览元素
+                        '//div[contains(@class, "video-preview")]//video',
+                        '//div[contains(@class, "video-preview")]//canvas',
+                        # 更通用的视频元素
+                        '//video[@src]',
+                        '//video[not(@src="")]'
                     ]
 
-                    # 如果找到进度指示器，说明还在上传
-                    uploading = False
-                    for selector in progress_indicators:
-                        if self.find_element_safe(By.XPATH, selector, timeout=1):
-                            uploading = True
-                            logger.info("检测到上传进度，继续等待...")
+                    video_preview_found = False
+                    for selector in mobile_preview_selectors:
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                        if elements:
+                            # 检查视频元素是否有内容
+                            for element in elements:
+                                try:
+                                    # 检查视频是否有duration（说明视频已加载）
+                                    if element.tag_name == 'video':
+                                        duration = self.driver.execute_script("return arguments[0].duration;", element)
+                                        readyState = self.driver.execute_script("return arguments[0].readyState;", element)
+                                        if duration and duration > 0:
+                                            logger.info(f"✅ 检测到手机预览中的视频内容，时长: {duration}秒，状态: {readyState}")
+                                            video_preview_found = True
+                                            break
+                                        elif readyState >= 2:  # HAVE_CURRENT_DATA or higher
+                                            logger.info(f"✅ 检测到视频数据已加载，状态: {readyState}")
+                                            video_preview_found = True
+                                            break
+                                    # 检查canvas是否有内容
+                                    elif element.tag_name == 'canvas':
+                                        width = self.driver.execute_script("return arguments[0].width;", element)
+                                        height = self.driver.execute_script("return arguments[0].height;", element)
+                                        if width > 0 and height > 0:
+                                            logger.info(f"✅ 检测到手机预览中的视频画布，尺寸: {width}x{height}")
+                                            video_preview_found = True
+                                            break
+                                except Exception as e:
+                                    logger.debug(f"检查预览元素时出错: {e}")
+                                    continue
+
+                        if video_preview_found:
                             break
 
-                    if not uploading:
-                        # 检查是否有视频预览或标题输入框可用
-                        completion_indicators = [
-                            '//video',  # 视频预览
-                            '//input[@class="semi-input semi-input-default"]',  # 标题输入框
-                            '//div[@data-placeholder="添加作品简介"]',  # 描述输入框
-                            '//button[text()="发布"]'  # 发布按钮
-                        ]
+                    if video_preview_found:
+                        # 额外等待确保上传完全完成
+                        logger.info("发现视频预览，等待3秒确保上传完成...")
+                        time.sleep(3)
 
-                        for selector in completion_indicators:
-                            element = self.find_element_safe(By.XPATH, selector, timeout=2)
-                            if element and element.is_enabled():
-                                logger.info("✅ 检测到上传完成指示器，上传完成")
-                                return True
+                        # 再次确认视频预览仍然存在
+                        final_check = False
+                        for selector in mobile_preview_selectors[:5]:  # 检查前5个最可靠的选择器
+                            elements = self.driver.find_elements(By.XPATH, selector)
+                            if elements:
+                                final_check = True
+                                break
+
+                        if final_check:
+                            logger.info("✅ 视频上传完成确认")
+                            return True
+                        else:
+                            logger.info("视频预览消失，继续等待...")
+
+                    # 检查是否有错误信息
+                    error_selectors = [
+                        '//div[contains(text(), "上传失败")]',
+                        '//div[contains(text(), "错误")]',
+                        '//div[contains(text(), "失败")]',
+                        '//span[contains(text(), "上传失败")]',
+                        '//div[contains(@class, "error")]'
+                    ]
+
+                    for error_selector in error_selectors:
+                        error_elements = self.driver.find_elements(By.XPATH, error_selector)
+                        if error_elements:
+                            logger.error("发现上传错误信息")
+                            return False
 
                     # 等待一段时间后再次检查
-                    time.sleep(3)
+                    time.sleep(4)  # 增加检测间隔
 
                 except Exception as e:
                     logger.debug(f"等待上传完成时出现异常: {e}")
-                    time.sleep(2)
+                    time.sleep(3)
 
             logger.warning("等待上传完成超时")
             return False
@@ -602,24 +803,31 @@ class SeleniumDouyinPublisher(SeleniumPublisherBase):
             logger.error(f"等待上传完成失败: {e}")
             return False
 
+    def _wait_for_upload_complete(self, timeout: int = 300, progress_callback=None) -> bool:
+        """等待视频上传完成（调用增强版方法）"""
+        return self._wait_for_upload_complete_enhanced(timeout, progress_callback)
+
     def _handle_error_dialogs(self):
-        """处理发布后可能出现的错误弹窗"""
+        """🔧 修复：检查发布后的页面状态，抖音发布成功后会直接跳转，不会显示确认弹窗"""
         try:
-            # 等待弹窗出现
+            # 等待页面响应
             time.sleep(2)
 
-            # 查找常见的错误弹窗和确认按钮
-            dialog_selectors = [
-                '//button[text()="确定"]',
-                '//button[text()="OK"]',
-                '//button[text()="知道了"]',
-                '//button[text()="我知道了"]',
-                '//button[contains(@class, "confirm")]',
-                '//div[contains(@class, "modal")]//button',
-                '//div[contains(@class, "dialog")]//button'
+            # 检查当前URL，如果已跳转到作品管理页面，说明发布成功
+            current_url = self.driver.current_url
+            if 'creator-micro/content/manage' in current_url:
+                logger.info("✅ 已跳转到作品管理页面，发布成功")
+                return
+
+            # 只检查真正的错误弹窗（不检查不存在的确认弹窗）
+            error_dialog_selectors = [
+                '//div[contains(@class, "error")]//button',
+                '//div[contains(@class, "fail")]//button',
+                '//div[contains(text(), "失败")]//button',
+                '//div[contains(text(), "错误")]//button'
             ]
 
-            for selector in dialog_selectors:
+            for selector in error_dialog_selectors:
                 try:
                     element = self.find_element_safe(By.XPATH, selector, timeout=1)
                     if element and element.is_displayed():

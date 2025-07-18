@@ -28,6 +28,52 @@ from src.services.platform_publisher.login_manager import login_manager
 from src.gui.platform_login_widget import PlatformLoginWidget
 from src.utils.logger import logger
 
+# 🔧 新增：AI优化相关导入
+try:
+    from src.services.service_manager import ServiceManager
+    from src.services.content_optimizer import ContentOptimizer
+    AI_OPTIMIZATION_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"AI优化服务不可用: {e}")
+    AI_OPTIMIZATION_AVAILABLE = False
+
+
+class AIOptimizeWorker(QThread):
+    """AI优化工作线程"""
+    optimization_completed = pyqtSignal(object)  # 优化结果
+    optimization_failed = pyqtSignal(str)  # 错误信息
+
+    def __init__(self, content_optimizer, title, description, platforms):
+        super().__init__()
+        self.content_optimizer = content_optimizer
+        self.title = title
+        self.description = description
+        self.platforms = platforms
+
+    def run(self):
+        """执行AI优化"""
+        try:
+            # 创建新的事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # 执行优化
+            result = loop.run_until_complete(
+                self.content_optimizer.optimize_content(
+                    title=self.title,
+                    description=self.description,
+                    platforms=self.platforms
+                )
+            )
+
+            self.optimization_completed.emit(result)
+
+        except Exception as e:
+            logger.error(f"AI优化工作线程错误: {e}")
+            self.optimization_failed.emit(str(e))
+        finally:
+            loop.close()
+
 
 class BrowserSetupThread(QThread):
     """浏览器设置线程"""
@@ -101,14 +147,29 @@ class PublishThread(QThread):
 
 class EnhancedOneClickPublishTab(QWidget):
     """增强版一键发布标签页"""
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.browser_manager = IntegratedBrowserManager()
         self.browser_config = None
         self.setup_thread = None
         self.publish_thread = None
-        
+
+        # 🔧 新增：初始化AI优化服务
+        self.service_manager = None
+        self.content_optimizer = None
+        self.ai_worker = None
+
+        if AI_OPTIMIZATION_AVAILABLE:
+            try:
+                self.service_manager = ServiceManager()
+                llm_service = self.service_manager.get_service('llm')
+                self.content_optimizer = ContentOptimizer(llm_service)
+                logger.info("✅ AI优化服务初始化成功")
+            except Exception as e:
+                logger.warning(f"AI优化服务初始化失败: {e}")
+                self.content_optimizer = None
+
         self.init_ui()
         
     def init_ui(self):
@@ -185,6 +246,44 @@ class EnhancedOneClickPublishTab(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setSpacing(15)
+
+        # 🔧 新增：AI优化组
+        ai_group = QGroupBox("🎯 AI内容优化")
+        ai_layout = QVBoxLayout(ai_group)
+
+        # AI优化按钮行
+        ai_button_row = QHBoxLayout()
+
+        self.ai_optimize_button = QPushButton("🎯 AI优化内容")
+        self.ai_optimize_button.clicked.connect(self.optimize_content_with_ai)
+        self.ai_optimize_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+
+        self.ai_status_label = QLabel()
+        self.ai_status_label.setStyleSheet("color: #666; font-size: 12px; padding: 5px;")
+
+        ai_button_row.addWidget(self.ai_optimize_button)
+        ai_button_row.addWidget(self.ai_status_label)
+        ai_button_row.addStretch()
+
+        ai_layout.addLayout(ai_button_row)
+        layout.addWidget(ai_group)
+
         # 视频信息组
         video_group = QGroupBox("📹 视频信息")
         video_layout = QVBoxLayout(video_group)
@@ -204,22 +303,24 @@ class EnhancedOneClickPublishTab(QWidget):
         video_layout.addLayout(file_layout)
 
         # 视频标题
-        video_layout.addWidget(QLabel("标题:"))
+        video_layout.addWidget(QLabel("📝 标题:"))
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("输入视频标题...")
+        self.title_edit.setPlaceholderText("AI将基于项目内容自动生成标题...")
+        self.title_edit.setMinimumHeight(35)
         video_layout.addWidget(self.title_edit)
 
         # 视频描述
-        video_layout.addWidget(QLabel("描述:"))
+        video_layout.addWidget(QLabel("📄 描述:"))
         self.description_edit = QTextEdit()
-        self.description_edit.setPlaceholderText("输入视频描述...")
+        self.description_edit.setPlaceholderText("AI将基于项目内容自动生成描述...")
         self.description_edit.setMaximumHeight(100)
         video_layout.addWidget(self.description_edit)
 
         # 标签
-        video_layout.addWidget(QLabel("标签 (用逗号分隔):"))
+        video_layout.addWidget(QLabel("🏷️ 标签 (用逗号分隔):"))
         self.tags_edit = QLineEdit()
-        self.tags_edit.setPlaceholderText("标签1, 标签2, 标签3...")
+        self.tags_edit.setPlaceholderText("AI将基于项目内容自动生成标签...")
+        self.tags_edit.setMinimumHeight(35)
         video_layout.addWidget(self.tags_edit)
 
         layout.addWidget(video_group)
@@ -671,3 +772,143 @@ class EnhancedOneClickPublishTab(QWidget):
         super().showEvent(event)
         if hasattr(self, 'login_widget'):
             self.update_login_status_display()
+
+        # 🔧 新增：更新AI按钮状态
+        self._update_ai_button_state()
+
+    def _update_ai_button_state(self):
+        """更新AI按钮状态"""
+        if self.content_optimizer:
+            self.ai_optimize_button.setEnabled(True)
+            self.ai_status_label.setText("AI优化可用")
+        else:
+            self.ai_optimize_button.setEnabled(False)
+            self.ai_status_label.setText("AI优化不可用")
+
+    def optimize_content_with_ai(self):
+        """使用AI优化内容"""
+        if not self.content_optimizer:
+            QMessageBox.warning(self, "警告", "AI优化服务不可用")
+            return
+
+        try:
+            logger.info("🔍 开始AI内容优化...")
+
+            # 获取当前内容
+            title = self.title_edit.text().strip()
+            description = self.description_edit.toPlainText().strip()
+
+            # 获取选中的平台
+            selected_platforms = []
+            for platform_id, checkbox in self.platform_checkboxes.items():
+                if checkbox.isChecked():
+                    selected_platforms.append(platform_id)
+
+            if not selected_platforms:
+                selected_platforms = ['bilibili']  # 默认平台
+
+            # 禁用按钮并显示进度
+            self.ai_optimize_button.setEnabled(False)
+            self.ai_status_label.setText("AI优化中...")
+
+            # 创建AI优化工作线程
+            self.ai_worker = AIOptimizeWorker(
+                self.content_optimizer,
+                title,
+                description,
+                selected_platforms
+            )
+
+            self.ai_worker.optimization_completed.connect(self.on_ai_optimization_completed)
+            self.ai_worker.optimization_failed.connect(self.on_ai_optimization_failed)
+            self.ai_worker.start()
+
+        except Exception as e:
+            logger.error(f"启动AI优化失败: {e}")
+            QMessageBox.critical(self, "错误", f"AI优化失败: {e}")
+            self._update_ai_button_state()
+
+    def on_ai_optimization_completed(self, optimized_content):
+        """AI优化完成"""
+        try:
+            # 更新界面内容
+            self.title_edit.setText(optimized_content.title)
+            self.description_edit.setPlainText(optimized_content.description)
+
+            # 更新标签
+            if optimized_content.tags:
+                tags_text = ', '.join(optimized_content.tags)
+                self.tags_edit.setText(tags_text)
+
+            # 显示优化结果
+            self.show_optimization_results(optimized_content)
+
+        except Exception as e:
+            logger.error(f"处理AI优化结果失败: {e}")
+
+        finally:
+            self._update_ai_button_state()
+
+    def on_ai_optimization_failed(self, error_message):
+        """AI优化失败"""
+        QMessageBox.critical(self, "AI优化失败", f"优化过程中出现错误:\n{error_message}")
+        self._update_ai_button_state()
+
+    def show_optimization_results(self, optimized_content):
+        """显示优化结果对话框"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QTabWidget
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("AI优化结果")
+        dialog.setModal(True)
+        dialog.resize(600, 500)
+
+        layout = QVBoxLayout(dialog)
+
+        # 创建标签页
+        tab_widget = QTabWidget()
+
+        # 标题标签页
+        title_tab = QWidget()
+        title_layout = QVBoxLayout(title_tab)
+        title_layout.addWidget(QLabel("优化后的标题:"))
+        title_text = QTextEdit()
+        title_text.setPlainText(optimized_content.title)
+        title_text.setReadOnly(True)
+        title_layout.addWidget(title_text)
+        tab_widget.addTab(title_tab, "📝 标题")
+
+        # 描述标签页
+        desc_tab = QWidget()
+        desc_layout = QVBoxLayout(desc_tab)
+        desc_layout.addWidget(QLabel("优化后的描述:"))
+        desc_text = QTextEdit()
+        desc_text.setPlainText(optimized_content.description)
+        desc_text.setReadOnly(True)
+        desc_layout.addWidget(desc_text)
+        tab_widget.addTab(desc_tab, "📄 描述")
+
+        # 标签标签页
+        tags_tab = QWidget()
+        tags_layout = QVBoxLayout(tags_tab)
+        tags_layout.addWidget(QLabel("优化后的标签:"))
+        tags_text = QTextEdit()
+        if optimized_content.tags:
+            tags_text.setPlainText('\n'.join(optimized_content.tags))
+        tags_text.setReadOnly(True)
+        tags_layout.addWidget(tags_text)
+        tab_widget.addTab(tags_tab, "🏷️ 标签")
+
+        layout.addWidget(tab_widget)
+
+        # 按钮
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(close_btn)
+
+        layout.addLayout(button_layout)
+
+        dialog.exec_()

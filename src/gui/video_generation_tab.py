@@ -971,7 +971,9 @@ class VideoGenerationTab(QWidget):
             self.scene_table.viewport().update()
             self.scene_table.repaint()
 
-            logger.info(f"成功加载 {len(self.current_scenes)} 个场景")
+            # 🔧 调试：统计视频数据
+            video_count = sum(1 for scene in self.current_scenes if scene.get('video_path') and os.path.exists(scene.get('video_path', '')))
+            logger.info(f"成功加载 {len(self.current_scenes)} 个场景，其中 {video_count} 个有视频文件")
 
         except Exception as e:
             logger.error(f"加载场景数据失败: {e}")
@@ -1913,9 +1915,11 @@ class VideoGenerationTab(QWidget):
                 generate_btn = QPushButton("🎬 生成")
                 generate_btn.setMaximumSize(80, 25)
 
-                # 根据状态设置按钮样式和文本
+                # 根据状态和视频文件存在情况设置按钮样式和文本
                 status = scene_data.get('status', '未生成')
-                if status == '已生成':
+                has_video = scene_data.get('video_path') and os.path.exists(scene_data.get('video_path', ''))
+
+                if status == '已生成' or has_video:
                     generate_btn.setText("🔄 重新生成")
                     generate_btn.setStyleSheet("QPushButton { background-color: #FF9800; color: white; font-size: 10px; }")
                 elif status == '生成中':
@@ -2396,81 +2400,182 @@ class VideoGenerationTab(QWidget):
             self.handle_batch_image_task_failure(scene_data, f"处理异常: {e}")
 
     def create_static_video_with_original_resolution(self, scene_data, image_path, duration):
-        """创建保持原图像分辨率的静态视频"""
+        """创建保持原图像分辨率的静态视频（使用后台线程避免UI卡死）"""
         try:
-            import subprocess
-            from PIL import Image
-
             shot_id = scene_data.get('shot_id', 'unknown')
-            logger.info(f"为镜头 {shot_id} 创建静态视频，时长: {duration}秒，保持原图像分辨率")
+            logger.info(f"为镜头 {shot_id} 创建带动画效果的静态视频，时长: {duration}秒")
 
-            # 获取原图像分辨率
-            with Image.open(image_path) as img:
-                img_width, img_height = img.size
-                logger.info(f"原图像尺寸: {img_width}x{img_height}")
+            # 🔧 修复：使用后台线程执行FFmpeg，避免UI卡死
+            from PyQt5.QtCore import QThread, QObject, pyqtSignal
 
-            # 生成输出文件名
-            timestamp = int(time.time() * 1000)
-            output_filename = f"image_video_{shot_id}_{timestamp}.mp4"
+            class AnimatedVideoCreationWorker(QObject):
+                """带动画效果的视频创建工作线程"""
+                finished = pyqtSignal(bool, str, str, object)  # success, output_path, error_msg, scene_data
 
-            # 确定输出目录
-            if self.project_manager and self.project_manager.current_project:
-                project_path = self.project_manager.get_current_project_path()
-                output_dir = os.path.join(project_path, 'videos', 'image_videos')
-            else:
-                output_dir = os.path.join('output', 'videos', 'image_videos')
+                def __init__(self, scene_data, image_path, duration, parent_tab):
+                    super().__init__()
+                    self.scene_data = scene_data
+                    self.image_path = image_path
+                    self.duration = duration
+                    self.parent_tab = parent_tab
 
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, output_filename)
+                def create_video(self):
+                    """在后台线程中创建带动画效果的视频"""
+                    try:
+                        import subprocess
+                        from PIL import Image
+                        import hashlib
 
-            # 使用FFmpeg创建静态视频，保持原图像分辨率
-            cmd = [
-                'ffmpeg/bin/ffmpeg.exe',
-                '-y',  # 覆盖输出文件
-                '-loop', '1',  # 循环输入图像
-                '-i', image_path,  # 输入图像
-                '-t', str(duration),  # 视频时长
-                '-r', '30',  # 帧率
-                '-c:v', 'libx264',  # 视频编码器
-                '-pix_fmt', 'yuv420p',  # 像素格式
-                '-preset', 'medium',  # 编码预设
-                output_path
-            ]
+                        shot_id = self.scene_data.get('shot_id', 'unknown')
 
-            logger.info(f"执行FFmpeg命令: {' '.join(cmd)}")
+                        # 获取原图像分辨率
+                        with Image.open(self.image_path) as img:
+                            img_width, img_height = img.size
+                            logger.info(f"原图像尺寸: {img_width}x{img_height}")
 
-            # 执行FFmpeg命令
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                        # 生成输出文件名
+                        timestamp = int(time.time() * 1000)
+                        output_filename = f"animated_video_{shot_id}_{timestamp}.mp4"
 
-            if result.returncode == 0 and os.path.exists(output_path):
-                logger.info(f"静态视频创建成功: {output_path}")
-                self.handle_batch_image_task_success(scene_data, output_path)
-            else:
-                error_msg = result.stderr if result.stderr else "FFmpeg执行失败"
-                logger.error(f"FFmpeg执行失败: {error_msg}")
-                self.handle_batch_image_task_failure(scene_data, f"视频创建失败: {error_msg}")
+                        # 确定输出目录
+                        if self.parent_tab.project_manager and self.parent_tab.project_manager.current_project:
+                            project_path = self.parent_tab.project_manager.get_current_project_path()
+                            output_dir = os.path.join(project_path, 'videos', 'image_videos')
+                        else:
+                            output_dir = os.path.join('output', 'videos', 'image_videos')
+
+                        os.makedirs(output_dir, exist_ok=True)
+                        output_path = os.path.join(output_dir, output_filename)
+
+                        # 🎬 优化：适中幅度的动画效果（减少三分之一幅度）
+                        animation_effects = [
+                            # 缩放+左右摇摆（适中版）
+                            "scale=1.15*iw:1.15*ih,crop=iw/1.15:ih/1.15:(iw-iw/1.15)/2+sin(t*3)*40:(ih-ih/1.15)/2",
+                            # 缩放+适中左移（适中版）
+                            "scale=1.12*iw:1.12*ih,crop=iw/1.12:ih/1.12:(iw-iw/1.12)/2+t*17:(ih-ih/1.12)/2",
+                            # 缩放+适中右移（适中版）
+                            "scale=1.12*iw:1.12*ih,crop=iw/1.12:ih/1.12:(iw-iw/1.12)/2-t*17:(ih-ih/1.12)/2",
+                            # 缩放+适中上移（适中版）
+                            "scale=1.14*iw:1.14*ih,crop=iw/1.14:ih/1.14:(iw-iw/1.14)/2:(ih-ih/1.14)/2+t*20",
+                            # 缩放+适中下移（适中版）
+                            "scale=1.14*iw:1.14*ih,crop=iw/1.14:ih/1.14:(iw-iw/1.14)/2:(ih-ih/1.14)/2-t*20",
+                            # 缩放+适中圆形运动（适中版）
+                            "scale=1.18*iw:1.18*ih,crop=iw/1.18:ih/1.18:(iw-iw/1.18)/2+sin(t*1.5)*53:(ih-ih/1.18)/2+cos(t*1.5)*33",
+                            # 缩放+适中对角线移动（适中版）
+                            "scale=1.15*iw:1.15*ih,crop=iw/1.15:ih/1.15:(iw-iw/1.15)/2+t*13:(ih-ih/1.15)/2+t*10",
+                            # 缩放+适中波浪运动（适中版）
+                            "scale=1.16*iw:1.16*ih,crop=iw/1.16:ih/1.16:(iw-iw/1.16)/2+sin(t*4)*30:(ih-ih/1.16)/2+sin(t*2.5)*20",
+                            # 缩放+适中螺旋运动（适中版）
+                            "scale=1.2*iw:1.2*ih,crop=iw/1.2:ih/1.2:(iw-iw/1.2)/2+sin(t*2)*t*5:(ih-ih/1.2)/2+cos(t*2)*t*5",
+                            # 缩放+适中Z字形运动（适中版）
+                            "scale=1.18*iw:1.18*ih,crop=iw/1.18:ih/1.18:(iw-iw/1.18)/2+sin(t*6)*47:(ih-ih/1.18)/2+t*13"
+                        ]
+
+                        # 根据镜头ID选择动画效果（确保同一镜头总是使用相同效果）
+                        shot_hash = int(hashlib.md5(shot_id.encode()).hexdigest()[:8], 16)
+                        animation_effect = animation_effects[shot_hash % len(animation_effects)]
+
+                        # 动画效果名称（用于日志）
+                        effect_names = [
+                            "缩放+左右摇摆（适中版）", "缩放+适中左移（适中版）", "缩放+适中右移（适中版）", "缩放+适中上移（适中版）",
+                            "缩放+适中下移（适中版）", "缩放+适中圆形运动（适中版）", "缩放+适中对角线移动（适中版）", "缩放+适中波浪运动（适中版）",
+                            "缩放+适中螺旋运动（适中版）", "缩放+适中Z字形运动（适中版）"
+                        ]
+                        effect_name = effect_names[shot_hash % len(effect_names)]
+
+                        # 使用FFmpeg创建带动画效果的视频
+                        cmd = [
+                            'ffmpeg/bin/ffmpeg.exe',
+                            '-y',  # 覆盖输出文件
+                            '-loop', '1',  # 循环输入图像
+                            '-i', self.image_path,  # 输入图像
+                            '-t', str(self.duration),  # 视频时长
+                            '-r', '30',  # 帧率
+                            '-vf', animation_effect,  # 视频滤镜（动画效果）
+                            '-c:v', 'libx264',  # 视频编码器
+                            '-pix_fmt', 'yuv420p',  # 像素格式
+                            '-preset', 'medium',  # 编码预设
+                            output_path
+                        ]
+
+                        logger.info(f"为镜头 {shot_id} 创建带动画效果的视频")
+                        logger.info(f"使用动画效果: {effect_name}")
+                        logger.info(f"执行FFmpeg命令: {' '.join(cmd)}")
+
+                        # 执行FFmpeg命令（增加超时时间）
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+                        if result.returncode == 0 and os.path.exists(output_path):
+                            logger.info(f"带动画效果的视频创建成功: {output_path}")
+                            self.finished.emit(True, output_path, "", self.scene_data)
+                        else:
+                            error_msg = result.stderr if result.stderr else "FFmpeg执行失败"
+                            logger.error(f"FFmpeg执行失败: {error_msg}")
+                            self.finished.emit(False, "", f"视频创建失败: {error_msg}", self.scene_data)
+
+                    except Exception as e:
+                        logger.error(f"创建带动画效果的视频失败: {e}")
+                        self.finished.emit(False, "", f"创建视频异常: {e}", self.scene_data)
+
+            # 🔧 修复：使用QTimer延迟执行，避免线程管理问题
+            def delayed_video_creation():
+                try:
+                    # 直接在主线程中创建worker并执行
+                    worker = AnimatedVideoCreationWorker(scene_data, image_path, duration, self)
+                    worker.finished.connect(self._on_animated_video_creation_finished)
+                    worker.create_video()
+                except Exception as e:
+                    logger.error(f"延迟视频创建失败: {e}")
+                    self.handle_batch_image_task_failure(scene_data, f"视频创建异常: {e}")
+
+            # 延迟100ms执行，确保UI状态更新完成
+            QTimer.singleShot(100, delayed_video_creation)
+            logger.info(f"已启动镜头 {shot_id} 的后台视频创建任务")
 
         except Exception as e:
-            logger.error(f"创建静态视频失败: {e}")
-            self.handle_batch_image_task_failure(scene_data, f"创建视频异常: {e}")
+            logger.error(f"启动带动画效果的视频创建任务失败: {e}")
+            self.handle_batch_image_task_failure(scene_data, f"启动任务异常: {e}")
+
+    def _on_animated_video_creation_finished(self, success, output_path, error_msg, scene_data):
+        """带动画效果的视频创建完成回调"""
+        try:
+            if success:
+                self.handle_batch_image_task_success(scene_data, output_path)
+            else:
+                self.handle_batch_image_task_failure(scene_data, error_msg)
+
+        except Exception as e:
+            logger.error(f"视频创建完成回调失败: {e}")
 
     def handle_batch_image_task_success(self, scene_data, output_path):
         """处理批量图像任务成功"""
         try:
-            # 更新场景状态
-            self.update_scene_status(scene_data, '已生成(图像)')
+            shot_id = scene_data.get('shot_id', 'unknown')
+            logger.info(f"处理镜头 {shot_id} 批量图像任务成功: {output_path}")
 
-            # 保存视频到项目
-            self.save_video_to_project(output_path)
+            # 更新场景状态为已生成，这样界面会正确显示
+            self.update_scene_status(scene_data, '已生成')
+
+            # 保存视频到项目 - 传递场景数据
+            try:
+                self.save_video_to_project(output_path, scene_data)
+                logger.debug(f"镜头 {shot_id} 视频路径已保存到项目")
+            except Exception as save_error:
+                logger.error(f"保存镜头 {shot_id} 视频到项目失败: {save_error}")
+                # 即使保存失败，也继续处理下一个任务
+                pass
 
             # 更新完成计数
             self.batch_processing_completed += 1
+            logger.debug(f"批量处理进度: {self.batch_processing_completed}/{self.batch_processing_total}")
 
             # 继续处理下一个任务
             self.process_next_batch_image_tasks()
 
         except Exception as e:
             logger.error(f"处理批量图像任务成功回调失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             self.handle_batch_image_task_failure(scene_data, f"成功回调异常: {e}")
 
     def handle_batch_image_task_failure(self, scene_data, error_message):
@@ -2524,6 +2629,17 @@ class VideoGenerationTab(QWidget):
 
             # 延迟500ms显示消息，确保UI状态更新完成
             QTimer.singleShot(500, show_completion_message)
+
+            # 🔧 修复：延迟通知视频合成界面刷新数据，避免在批量处理完成时立即触发界面重新初始化
+            def delayed_notify_refresh():
+                try:
+                    logger.info("批量处理完成，延迟通知视频合成界面刷新")
+                    self.notify_video_synthesis_refresh()
+                except Exception as notify_error:
+                    logger.error(f"延迟通知视频合成界面刷新失败: {notify_error}")
+
+            # 延迟2秒通知，确保批量处理状态完全清理完成
+            QTimer.singleShot(2000, delayed_notify_refresh)
 
             logger.info(f"批量图像处理完成: 成功 {success_count}, 失败 {failed_count}, 总计 {total_count}")
 
@@ -3315,57 +3431,66 @@ class VideoGenerationTab(QWidget):
 
             for i, scene in enumerate(self.current_scenes):
                 # 使用多种方式匹配场景，优先使用shot_id精确匹配
-                scene_match = False
                 current_shot_id = scene.get('shot_id', '')
 
                 # 方式1：通过shot_id精确匹配（最优先）
                 if target_shot_id and current_shot_id and target_shot_id == current_shot_id:
-                    scene_match = True
-                    logger.debug(f"通过shot_id精确匹配场景: {target_shot_id}")
+                    scene['status'] = status
+                    scene_found = True
+                    logger.info(f"成功更新场景状态: {target_shot_id} -> {status} (精确匹配: {current_shot_id})")
+                    # 刷新表格显示
+                    self.update_scene_table()
+                    break
 
                 # 方式2：通过scene_id和shot_id匹配
                 elif (scene.get('scene_id') == scene_data.get('scene_id') and
                       scene.get('shot_id') == scene_data.get('shot_id')):
-                    scene_match = True
-                    logger.debug(f"通过scene_id+shot_id匹配场景: {target_shot_id}")
-
-                # 方式3：通过scene_index和shot_index匹配（兼容旧格式）
-                elif (scene.get('scene_index') == scene_data.get('scene_index') and
-                      scene.get('shot_index') == scene_data.get('shot_index')):
-                    scene_match = True
-                    logger.debug(f"通过索引匹配场景: {target_shot_id}")
-
-                # 方式4：通过索引位置匹配（最后的兜底方案）
-                elif not scene_match and target_shot_id:
-                    # 尝试从shot_id中提取数字索引进行匹配
-                    try:
-                        # 提取target_shot_id中的数字部分
-                        import re
-                        target_match = re.search(r'(\d+)', target_shot_id)
-                        current_match = re.search(r'(\d+)', current_shot_id) if current_shot_id else None
-
-                        if target_match and current_match:
-                            target_num = int(target_match.group(1))
-                            current_num = int(current_match.group(1))
-                            if target_num == current_num:
-                                scene_match = True
-                                logger.debug(f"通过数字索引匹配场景: {target_shot_id} -> {current_shot_id}")
-                        elif target_match:
-                            # 如果只有target有数字，尝试按位置匹配
-                            target_num = int(target_match.group(1))
-                            if i + 1 == target_num:  # 索引从0开始，但编号从1开始
-                                scene_match = True
-                                logger.debug(f"通过位置索引匹配场景: {target_shot_id} -> 位置{i+1}")
-                    except (ValueError, AttributeError):
-                        pass
-
-                if scene_match:
                     scene['status'] = status
                     scene_found = True
-                    logger.info(f"成功更新场景状态: {target_shot_id} -> {status} (匹配到: {current_shot_id})")
+                    logger.info(f"成功更新场景状态: {target_shot_id} -> {status} (scene_id+shot_id匹配: {current_shot_id})")
                     # 刷新表格显示
                     self.update_scene_table()
                     break
+
+                # 方式3：通过scene_index和shot_index匹配（兼容旧格式）
+                elif (scene_data.get('scene_index') is not None and scene.get('scene_index') is not None and
+                      scene_data.get('shot_index') is not None and scene.get('shot_index') is not None and
+                      scene.get('scene_index') == scene_data.get('scene_index') and
+                      scene.get('shot_index') == scene_data.get('shot_index')):
+                    scene['status'] = status
+                    scene_found = True
+                    logger.info(f"成功更新场景状态: {target_shot_id} -> {status} (索引匹配: {current_shot_id})")
+                    # 刷新表格显示
+                    self.update_scene_table()
+                    break
+
+            # 如果精确匹配失败，尝试数字索引匹配（兜底方案）
+            if not scene_found and target_shot_id:
+                import re
+                target_match = re.search(r'(\d+)', target_shot_id)
+                if target_match:
+                    target_num = int(target_match.group(1))
+
+                    for i, scene in enumerate(self.current_scenes):
+                        current_shot_id = scene.get('shot_id', '')
+                        current_match = re.search(r'(\d+)', current_shot_id) if current_shot_id else None
+
+                        # 通过数字索引匹配
+                        if current_match:
+                            current_num = int(current_match.group(1))
+                            if target_num == current_num:
+                                scene['status'] = status
+                                scene_found = True
+                                logger.info(f"成功更新场景状态: {target_shot_id} -> {status} (数字匹配: {current_shot_id})")
+                                self.update_scene_table()
+                                break
+                        # 通过位置索引匹配
+                        elif i + 1 == target_num:  # 索引从0开始，但编号从1开始
+                            scene['status'] = status
+                            scene_found = True
+                            logger.info(f"成功更新场景状态: {target_shot_id} -> {status} (位置匹配: 位置{i+1})")
+                            self.update_scene_table()
+                            break
 
             if not scene_found:
                 logger.warning(f"未找到匹配的场景，无法更新状态: {target_shot_id}")
@@ -3611,31 +3736,84 @@ class VideoGenerationTab(QWidget):
         except Exception as e:
             logger.error(f"取消生成失败: {e}")
 
-    def save_video_to_project(self, video_path):
+    def save_video_to_project(self, video_path, scene_data=None):
         """保存视频路径到项目"""
         try:
-            if not self.project_manager or not hasattr(self, '_current_generating_scene'):
+            if not self.project_manager:
+                logger.warning("项目管理器未初始化，无法保存视频")
                 return
 
-            # 获取当前生成的场景
-            current_scene = self._current_generating_scene
+            # 获取场景数据 - 优先使用传入的scene_data，否则使用_current_generating_scene
+            current_scene = scene_data
+            if not current_scene and hasattr(self, '_current_generating_scene'):
+                current_scene = self._current_generating_scene
+
+            if not current_scene:
+                logger.warning("没有场景数据，无法保存视频")
+                return
+
             shot_id = current_scene.get('shot_id', '')
+            logger.info(f"正在为镜头 {shot_id} 保存视频路径: {video_path}")
 
             # 在current_scenes中找到对应场景并更新视频路径
+            scene_found = False
             for scene in self.current_scenes:
                 if scene.get('shot_id') == shot_id:
                     scene['video_path'] = video_path
                     logger.info(f"为镜头 {shot_id} 保存视频路径: {video_path}")
-
-                    # 刷新表格显示
-                    self.update_scene_table()
+                    scene_found = True
                     break
 
+            if not scene_found:
+                logger.warning(f"未找到镜头 {shot_id} 对应的场景数据")
+
+            # 刷新表格显示
+            self.update_scene_table()
+
             # 记录视频生成信息到项目数据
-            self.record_video_generation(video_path, current_scene)
+            try:
+                self.record_video_generation(video_path, current_scene)
+                logger.debug(f"镜头 {shot_id} 视频生成信息已记录")
+            except Exception as record_error:
+                logger.error(f"记录镜头 {shot_id} 视频生成信息失败: {record_error}")
+                # 记录失败不影响主流程
+
+            # 通知主窗口刷新视频合成界面
+            try:
+                self.notify_video_synthesis_refresh()
+                logger.debug(f"已通知视频合成界面刷新")
+            except Exception as notify_error:
+                logger.warning(f"通知视频合成界面刷新失败: {notify_error}")
+                # 通知失败不影响主流程
 
         except Exception as e:
             logger.error(f"保存视频到项目失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
+
+    def notify_video_synthesis_refresh(self):
+        """通知视频合成界面刷新数据"""
+        try:
+            # 🔧 修复：在批量处理过程中跳过通知，避免触发界面重新加载
+            if self.batch_processing_active:
+                logger.debug("批量处理进行中，跳过视频合成界面刷新通知")
+                return
+
+            # 通过主窗口刷新视频合成界面
+            main_window = self.parent()
+            while main_window and not hasattr(main_window, 'pages'):
+                main_window = main_window.parent()
+
+            if main_window and hasattr(main_window, 'pages') and 'video' in main_window.pages:
+                video_composition_tab = main_window.pages['video']
+                if hasattr(video_composition_tab, 'load_project_data'):
+                    video_composition_tab.load_project_data()
+                    logger.info("已通知视频合成界面刷新数据")
+                elif hasattr(video_composition_tab, 'refresh_data'):
+                    video_composition_tab.refresh_data()
+                    logger.info("已通知视频合成界面刷新数据")
+        except Exception as e:
+            logger.warning(f"通知视频合成界面刷新失败: {e}")
 
     def record_video_generation(self, video_path, scene_data):
         """记录视频生成信息到项目数据"""
@@ -3673,9 +3851,6 @@ class VideoGenerationTab(QWidget):
                 "created_time": datetime.now().isoformat()
             }
 
-            # 添加到项目数据
-            self.project_manager.add_video_record(video_record)
-
             # 🔧 新增：同时保存到shot_mappings中，确保重新加载时能找到视频路径
             try:
                 shot_id = scene_data.get('shot_id', '')
@@ -3690,11 +3865,20 @@ class VideoGenerationTab(QWidget):
                     self.project_manager.current_project['shot_mappings'][shot_id]['video_path'] = video_path
                     self.project_manager.current_project['shot_mappings'][shot_id]['video_status'] = 'completed'
 
-                    # 保存项目数据
-                    self.project_manager.save_project()
-                    logger.debug(f"已保存视频路径到shot_mappings: {shot_id} -> {video_path}")
+                    # 同时更新voice_segments中的视频数据
+                    if 'voice_generation' in self.project_manager.current_project and 'voice_segments' in self.project_manager.current_project['voice_generation']:
+                        for segment in self.project_manager.current_project['voice_generation']['voice_segments']:
+                            if segment.get('shot_id') == shot_id:
+                                segment['video_path'] = video_path
+                                segment['video_status'] = '已生成'
+                                break
+
+                    logger.debug(f"已更新视频路径到shot_mappings和voice_segments: {shot_id} -> {video_path}")
             except Exception as e:
-                logger.warning(f"保存视频路径到shot_mappings失败: {e}")
+                logger.warning(f"更新视频路径失败: {e}")
+
+            # 添加到项目数据（这会自动保存项目）
+            self.project_manager.add_video_record(video_record)
 
             logger.info(f"已记录视频生成信息: {video_record['video_id']}")
 
@@ -4174,9 +4358,14 @@ class VideoGenerationTab(QWidget):
         """页面显示时的事件处理"""
         super().showEvent(event)
         try:
-            # 页面显示时重新加载项目数据和更新输出目录标签
-            self.load_project_data()
-            logger.info("图铃视频页面显示，已重新加载项目数据")
+            # 🔧 修复：只在批量处理不活跃时才重新加载项目数据
+            if not self.batch_processing_active:
+                self.load_project_data()
+                logger.info("图铃视频页面显示，已重新加载项目数据")
+            else:
+                logger.debug("批量处理进行中，跳过项目数据重新加载")
+                # 只更新输出目录标签，不重新加载数据
+                self.update_output_dir_label()
         except Exception as e:
             logger.error(f"页面显示时加载数据失败: {e}")
 

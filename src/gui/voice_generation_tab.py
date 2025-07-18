@@ -587,9 +587,9 @@ class VoiceGenerationTab(QWidget):
         engines = [
             ('edge_tts', 'Edge-TTS (免费)'),
             ('cosyvoice', 'CosyVoice (本地)'),
-            ('ttsmaker', 'TTSMaker (免费额度)'),
-            ('xunfei', '科大讯飞 (免费额度)'),
-            ('elevenlabs', 'ElevenLabs (付费)')
+            ('azure_speech', 'Azure Speech (免费额度)'),
+            ('google_tts', 'Google Cloud TTS (免费额度)'),
+            ('baidu_tts', '百度智能云 (免费额度)')
         ]
         for engine_id, engine_name in engines:
             self.engine_combo.addItem(engine_name, engine_id)

@@ -118,9 +118,9 @@ class AIVoiceSettingsWidget(QWidget):
         engines = [
             ('edge_tts', '🔊 Edge-TTS (免费)', 'Microsoft免费TTS，支持多语言'),
             ('cosyvoice', '🏠 CosyVoice (本地)', '阿里开源本地TTS，高质量中文'),
-            ('ttsmaker', '🌐 TTSMaker (免费额度)', '在线TTS服务，有免费额度'),
-            ('xunfei', '🇨🇳 科大讯飞 (免费额度)', '中文TTS专家，自然语音'),
-            ('elevenlabs', '⭐ ElevenLabs (付费)', '高质量付费TTS，最佳效果')
+            ('azure_speech', '🎤 Azure Speech (免费额度)', 'Microsoft高质量神经网络语音，支持情感'),
+            ('google_tts', '🌍 Google Cloud TTS (免费额度)', 'Google WaveNet技术，自然度极高'),
+            ('baidu_tts', '🇨🇳 百度智能云 (免费额度)', '中文语音合成专家，本土化优化')
         ]
         
         for engine_id, tab_name, description in engines:

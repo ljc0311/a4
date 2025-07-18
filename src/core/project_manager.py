@@ -226,6 +226,16 @@ class ProjectManager:
                     "auto_backup": True,
                     "backup_interval": 300,  # 5分钟
                     "max_backups": 10
+                },
+                # 🔧 新增：发布内容保存
+                "publish_content": {
+                    "title": "",
+                    "description": "",
+                    "tags": "",
+                    "cover_image_path": "",
+                    "selected_platforms": [],
+                    "last_generated_time": "",
+                    "ai_optimization_history": []
                 }
             }
             
@@ -340,6 +350,133 @@ class ProjectManager:
             
         except Exception as e:
             logger.error(f"保存项目失败: {e}")
+            return False
+
+    def save_publish_content(self, title: str = "", description: str = "", tags: str = "",
+                           cover_image_path: str = "", selected_platforms: list = None) -> bool:
+        """🔧 新增：保存发布内容到项目"""
+        try:
+            if not self.current_project:
+                logger.warning("没有当前项目，无法保存发布内容")
+                return False
+
+            from datetime import datetime
+
+            # 确保publish_content字段存在
+            if "publish_content" not in self.current_project:
+                self.current_project["publish_content"] = {
+                    "title": "",
+                    "description": "",
+                    "tags": "",
+                    "cover_image_path": "",
+                    "selected_platforms": [],
+                    "last_generated_time": "",
+                    "ai_optimization_history": []
+                }
+
+            # 保存发布内容
+            publish_content = self.current_project["publish_content"]
+
+            if title:
+                publish_content["title"] = title
+            if description:
+                publish_content["description"] = description
+            if tags:
+                publish_content["tags"] = tags
+            if cover_image_path:
+                publish_content["cover_image_path"] = cover_image_path
+            if selected_platforms is not None:
+                publish_content["selected_platforms"] = selected_platforms
+
+            publish_content["last_generated_time"] = datetime.now().isoformat()
+
+            # 保存项目
+            success = self.save_project()
+            if success:
+                logger.info("✅ 发布内容已保存到项目")
+            return success
+
+        except Exception as e:
+            logger.error(f"保存发布内容失败: {e}")
+            return False
+
+    def get_publish_content(self) -> dict:
+        """🔧 新增：获取项目的发布内容"""
+        try:
+            if not self.current_project:
+                return {
+                    "title": "",
+                    "description": "",
+                    "tags": "",
+                    "cover_image_path": "",
+                    "selected_platforms": [],
+                    "last_generated_time": "",
+                    "ai_optimization_history": []
+                }
+
+            # 确保publish_content字段存在
+            if "publish_content" not in self.current_project:
+                self.current_project["publish_content"] = {
+                    "title": "",
+                    "description": "",
+                    "tags": "",
+                    "cover_image_path": "",
+                    "selected_platforms": [],
+                    "last_generated_time": "",
+                    "ai_optimization_history": []
+                }
+                self.save_project()  # 保存新增的字段
+
+            return self.current_project["publish_content"]
+
+        except Exception as e:
+            logger.error(f"获取发布内容失败: {e}")
+            return {
+                "title": "",
+                "description": "",
+                "tags": "",
+                "cover_image_path": "",
+                "selected_platforms": [],
+                "last_generated_time": "",
+                "ai_optimization_history": []
+            }
+
+    def add_ai_optimization_history(self, optimization_data: dict) -> bool:
+        """🔧 新增：添加AI优化历史记录"""
+        try:
+            if not self.current_project:
+                return False
+
+            from datetime import datetime
+
+            # 确保publish_content字段存在
+            if "publish_content" not in self.current_project:
+                self.current_project["publish_content"] = {
+                    "title": "",
+                    "description": "",
+                    "tags": "",
+                    "cover_image_path": "",
+                    "selected_platforms": [],
+                    "last_generated_time": "",
+                    "ai_optimization_history": []
+                }
+
+            # 添加时间戳
+            optimization_data["timestamp"] = datetime.now().isoformat()
+
+            # 添加到历史记录
+            history = self.current_project["publish_content"]["ai_optimization_history"]
+            history.append(optimization_data)
+
+            # 保持最近10条记录
+            if len(history) > 10:
+                history[:] = history[-10:]
+
+            # 保存项目
+            return self.save_project()
+
+        except Exception as e:
+            logger.error(f"添加AI优化历史失败: {e}")
             return False
     
     def get_project_file_path(self, file_type: str, filename: str = None) -> Path:

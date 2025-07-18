@@ -302,42 +302,221 @@ class CosyVoiceEngine(TTSEngineBase):
         }
 
 
-class TTSMakerEngine(TTSEngineBase):
-    """TTSMaker引擎"""
+class AzureSpeechEngine(TTSEngineBase):
+    """Azure Cognitive Services Speech引擎"""
 
     def __init__(self, config_manager: ConfigManager):
         super().__init__(config_manager)
-        self.api_url = 'https://api.ttsmaker.com/v1/create-speech'
-        self.api_key = self.config_manager.get_setting('ttsmaker.api_key', '')
+        self.api_key = self.config_manager.get_setting('azure_speech.api_key', '')
+        self.region = self.config_manager.get_setting('azure_speech.region', 'eastus')
+        self.api_url = f'https://{self.region}.tts.speech.microsoft.com/cognitiveservices/v1'
 
     async def generate_speech(self, text: str, output_path: str, **kwargs) -> Dict[str, Any]:
-        """使用TTSMaker生成语音"""
+        """使用Azure Speech生成语音"""
         try:
             if not self.api_key:
                 return {
                     'success': False,
-                    'error': 'TTSMaker API Key未配置'
+                    'error': 'Azure Speech API Key未配置'
                 }
 
+            # 确保输出目录存在
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            # 构建SSML
             voice = kwargs.get('voice', 'zh-CN-XiaoxiaoNeural')
             speed = kwargs.get('speed', 1.0)
+            pitch = kwargs.get('pitch', 0)
+            volume = kwargs.get('volume', 1.0)
+            emotion = kwargs.get('emotion', 'neutral')
+
+            # 构建SSML文档
+            ssml = f'''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+                       xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="zh-CN">
+                <voice name="{voice}">
+                    <mstts:express-as style="{emotion}">
+                        <prosody rate="{speed}" pitch="{pitch:+.0f}%" volume="{volume}">
+                            {text}
+                        </prosody>
+                    </mstts:express-as>
+                </voice>
+            </speak>'''
+
+            headers = {
+                'Ocp-Apim-Subscription-Key': self.api_key,
+                'Content-Type': 'application/ssml+xml',
+                'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3',
+                'User-Agent': 'VideoCreator'
+            }
+
+            # 发送请求
+            response = requests.post(self.api_url, data=ssml.encode('utf-8'), headers=headers, timeout=30)
+
+            if response.status_code == 200:
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+
+                logger.info(f"Azure Speech语音生成成功: {output_path}")
+                return {
+                    'success': True,
+                    'audio_file': output_path,
+                    'engine': 'azure_speech',
+                    'voice': voice
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f'Azure Speech API请求失败: {response.status_code} - {response.text}'
+                }
+
+        except Exception as e:
+            logger.error(f"Azure Speech语音生成失败: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def get_available_voices(self) -> List[Dict[str, str]]:
+        """获取可用音色列表"""
+        return [
+            # 中文神经网络语音
+            {'id': 'zh-CN-XiaoxiaoNeural', 'name': '晓晓 (温柔女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaohanNeural', 'name': '晓涵 (温暖女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaomengNeural', 'name': '晓梦 (甜美女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaomoNeural', 'name': '晓墨 (成熟女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaoqiuNeural', 'name': '晓秋 (知性女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaoruiNeural', 'name': '晓睿 (活泼女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaoshuangNeural', 'name': '晓双 (清脆女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaoxuanNeural', 'name': '晓萱 (优雅女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaoyanNeural', 'name': '晓颜 (亲切女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaoyouNeural', 'name': '晓悠 (舒缓女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-XiaozhenNeural', 'name': '晓甄 (专业女声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-YunxiNeural', 'name': '云希 (阳光男声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-YunyangNeural', 'name': '云扬 (成熟男声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-YunjianNeural', 'name': '云健 (稳重男声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-YunxiaNeural', 'name': '云夏 (清朗男声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-YunyeNeural', 'name': '云野 (磁性男声)', 'language': 'zh-CN'},
+            {'id': 'zh-CN-YunzeNeural', 'name': '云泽 (温和男声)', 'language': 'zh-CN'},
+            # 英文神经网络语音
+            {'id': 'en-US-AriaNeural', 'name': 'Aria (美式女声)', 'language': 'en-US'},
+            {'id': 'en-US-JennyNeural', 'name': 'Jenny (美式女声)', 'language': 'en-US'},
+            {'id': 'en-US-GuyNeural', 'name': 'Guy (美式男声)', 'language': 'en-US'},
+            {'id': 'en-US-DavisNeural', 'name': 'Davis (美式男声)', 'language': 'en-US'}
+        ]
+
+    def test_connection(self) -> Dict[str, Any]:
+        """测试Azure Speech连接"""
+        try:
+            if not self.api_key:
+                return {
+                    'success': False,
+                    'error': 'Azure Speech API Key未配置'
+                }
+
+            # 发送测试请求
+            test_ssml = '''<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN">
+                <voice name="zh-CN-XiaoxiaoNeural">测试</voice>
+            </speak>'''
+
+            headers = {
+                'Ocp-Apim-Subscription-Key': self.api_key,
+                'Content-Type': 'application/ssml+xml',
+                'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3',
+                'User-Agent': 'VideoCreator'
+            }
+
+            response = requests.post(self.api_url, data=test_ssml.encode('utf-8'), headers=headers, timeout=10)
+
+            if response.status_code == 200:
+                return {
+                    'success': True,
+                    'message': 'Azure Speech连接正常'
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f'Azure Speech连接失败: {response.status_code}'
+                }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def get_default_settings(self) -> Dict[str, Any]:
+        """获取Azure Speech默认设置"""
+        return {
+            'voice': 'zh-CN-XiaoxiaoNeural',
+            'speed': 1.0,
+            'pitch': 0,
+            'volume': 1.0,
+            'emotion': 'neutral',
+            'language': 'zh-CN',
+            'api_key': self.api_key,
+            'region': self.region
+        }
+
+
+class GoogleTTSEngine(TTSEngineBase):
+    """Google Cloud Text-to-Speech引擎"""
+
+    def __init__(self, config_manager: ConfigManager):
+        super().__init__(config_manager)
+        self.api_key = self.config_manager.get_setting('google_tts.api_key', '')
+        self.api_url = 'https://texttospeech.googleapis.com/v1/text:synthesize'
+
+    async def generate_speech(self, text: str, output_path: str, **kwargs) -> Dict[str, Any]:
+        """使用Google Cloud TTS生成语音"""
+        try:
+            if not self.api_key:
+                return {
+                    'success': False,
+                    'error': 'Google Cloud TTS API Key未配置'
+                }
 
             # 确保输出目录存在
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             # 构建请求数据
+            voice = kwargs.get('voice', 'cmn-CN-Wavenet-A')
+            speed = kwargs.get('speed', 1.0)
+            pitch = kwargs.get('pitch', 0)
+            volume = kwargs.get('volume', 1.0)
+
+            # 解析语音ID获取语言和性别
+            if 'cmn-CN' in voice:
+                language_code = 'cmn-CN'
+            elif 'zh-CN' in voice:
+                language_code = 'zh-CN'
+            elif 'en-US' in voice:
+                language_code = 'en-US'
+            else:
+                language_code = 'zh-CN'
+
             data = {
-                'text': text,
-                'voice_id': voice,
-                'audio_format': 'mp3',
-                'speed': speed,
-                'volume': kwargs.get('volume', 1.0),
-                'pitch': kwargs.get('pitch', 0)
+                'input': {
+                    'ssml': f'''<speak>
+                        <prosody rate="{speed}" pitch="{pitch:+.0f}%" volume="{volume}">
+                            {text}
+                        </prosody>
+                    </speak>'''
+                },
+                'voice': {
+                    'languageCode': language_code,
+                    'name': voice
+                },
+                'audioConfig': {
+                    'audioEncoding': 'MP3',
+                    'speakingRate': speed,
+                    'pitch': pitch,
+                    'volumeGainDb': volume * 6 - 6  # 转换为dB
+                }
             }
 
             headers = {
-                'Authorization': f'Bearer {self.api_key}',
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': self.api_key
             }
 
             # 发送请求
@@ -346,77 +525,82 @@ class TTSMakerEngine(TTSEngineBase):
             if response.status_code == 200:
                 result = response.json()
 
-                if result.get('success'):
-                    # 下载音频文件
-                    audio_url = result.get('audio_url')
-                    if audio_url:
-                        audio_response = requests.get(audio_url, timeout=30)
-                        if audio_response.status_code == 200:
-                            with open(output_path, 'wb') as f:
-                                f.write(audio_response.content)
+                # 解码音频数据
+                import base64
+                audio_data = base64.b64decode(result['audioContent'])
 
-                            return {
-                                'success': True,
-                                'audio_file': output_path,
-                                'engine': 'ttsmaker',
-                                'voice': voice
-                            }
-                        else:
-                            return {
-                                'success': False,
-                                'error': '下载音频文件失败'
-                            }
-                    else:
-                        return {
-                            'success': False,
-                            'error': '未获取到音频URL'
-                        }
-                else:
-                    return {
-                        'success': False,
-                        'error': result.get('message', '生成失败')
-                    }
+                with open(output_path, 'wb') as f:
+                    f.write(audio_data)
+
+                logger.info(f"Google TTS语音生成成功: {output_path}")
+                return {
+                    'success': True,
+                    'audio_file': output_path,
+                    'engine': 'google_tts',
+                    'voice': voice
+                }
             else:
                 return {
                     'success': False,
-                    'error': f'TTSMaker API请求失败: {response.status_code}'
+                    'error': f'Google TTS API请求失败: {response.status_code} - {response.text}'
                 }
 
         except Exception as e:
-            logger.error(f"TTSMaker生成失败: {e}")
+            logger.error(f"Google TTS语音生成失败: {e}")
             return {
                 'success': False,
-                'error': f'TTSMaker生成失败: {str(e)}'
+                'error': str(e)
             }
 
     def get_available_voices(self) -> List[Dict[str, str]]:
-        """获取TTSMaker可用音色"""
+        """获取可用音色列表"""
         return [
-            {'id': 'zh-CN-XiaoxiaoNeural', 'name': '晓晓-女声', 'language': 'zh-CN'},
-            {'id': 'zh-CN-YunxiNeural', 'name': '云希-男声', 'language': 'zh-CN'},
-            {'id': 'en-US-AriaNeural', 'name': 'Aria-Female', 'language': 'en-US'},
-            {'id': 'en-US-GuyNeural', 'name': 'Guy-Male', 'language': 'en-US'},
+            # 中文WaveNet语音
+            {'id': 'cmn-CN-Wavenet-A', 'name': '中文女声A (WaveNet)', 'language': 'cmn-CN'},
+            {'id': 'cmn-CN-Wavenet-B', 'name': '中文男声B (WaveNet)', 'language': 'cmn-CN'},
+            {'id': 'cmn-CN-Wavenet-C', 'name': '中文男声C (WaveNet)', 'language': 'cmn-CN'},
+            {'id': 'cmn-CN-Wavenet-D', 'name': '中文女声D (WaveNet)', 'language': 'cmn-CN'},
+            # 中文标准语音
+            {'id': 'cmn-CN-Standard-A', 'name': '中文女声A (标准)', 'language': 'cmn-CN'},
+            {'id': 'cmn-CN-Standard-B', 'name': '中文男声B (标准)', 'language': 'cmn-CN'},
+            {'id': 'cmn-CN-Standard-C', 'name': '中文男声C (标准)', 'language': 'cmn-CN'},
+            {'id': 'cmn-CN-Standard-D', 'name': '中文女声D (标准)', 'language': 'cmn-CN'},
+            # 英文Neural2语音
+            {'id': 'en-US-Neural2-A', 'name': '英文女声A (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-C', 'name': '英文女声C (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-D', 'name': '英文男声D (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-E', 'name': '英文女声E (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-F', 'name': '英文女声F (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-G', 'name': '英文女声G (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-H', 'name': '英文女声H (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-I', 'name': '英文男声I (Neural2)', 'language': 'en-US'},
+            {'id': 'en-US-Neural2-J', 'name': '英文男声J (Neural2)', 'language': 'en-US'}
         ]
 
     def test_connection(self) -> Dict[str, Any]:
-        """测试TTSMaker连接"""
+        """测试Google TTS连接"""
         try:
             if not self.api_key:
                 return {
                     'success': False,
-                    'error': 'TTSMaker API Key未配置'
+                    'error': 'Google Cloud TTS API Key未配置'
                 }
 
             # 发送测试请求
-            headers = {
-                'Authorization': f'Bearer {self.api_key}',
-                'Content-Type': 'application/json'
+            test_data = {
+                'input': {'text': '测试'},
+                'voice': {
+                    'languageCode': 'cmn-CN',
+                    'name': 'cmn-CN-Wavenet-A'
+                },
+                'audioConfig': {
+                    'audioEncoding': 'MP3'
+                }
             }
 
-            test_data = {
-                'text': '测试',
-                'voice_id': 'zh-CN-XiaoxiaoNeural',
-                'audio_format': 'mp3'
+            headers = {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': self.api_key
             }
 
             response = requests.post(self.api_url, json=test_data, headers=headers, timeout=10)
@@ -424,12 +608,12 @@ class TTSMakerEngine(TTSEngineBase):
             if response.status_code == 200:
                 return {
                     'success': True,
-                    'message': 'TTSMaker连接正常'
+                    'message': 'Google TTS连接正常'
                 }
             else:
                 return {
                     'success': False,
-                    'error': f'TTSMaker连接失败: {response.status_code}'
+                    'error': f'Google TTS连接失败: {response.status_code}'
                 }
 
         except Exception as e:
@@ -439,277 +623,190 @@ class TTSMakerEngine(TTSEngineBase):
             }
 
     def get_default_settings(self) -> Dict[str, Any]:
-        """获取TTSMaker默认设置"""
+        """获取Google TTS默认设置"""
         return {
-            'voice': 'zh-CN-XiaoxiaoNeural',
+            'voice': 'cmn-CN-Wavenet-A',
             'speed': 1.0,
             'pitch': 0,
             'volume': 1.0,
-            'language': 'zh-CN',
+            'language': 'cmn-CN',
             'api_key': self.api_key
         }
 
 
-class XunfeiEngine(TTSEngineBase):
-    """科大讯飞引擎"""
+class BaiduTTSEngine(TTSEngineBase):
+    """百度智能云语音合成引擎"""
 
     def __init__(self, config_manager: ConfigManager):
         super().__init__(config_manager)
-        self.app_id = self.config_manager.get_setting('xunfei.app_id', '')
-        self.api_key = self.config_manager.get_setting('xunfei.api_key', '')
-        self.api_secret = self.config_manager.get_setting('xunfei.api_secret', '')
-        self.api_url = 'https://tts-api.xfyun.cn/v2/tts'
+        self.api_key = self.config_manager.get_setting('baidu_tts.api_key', '')
+        self.secret_key = self.config_manager.get_setting('baidu_tts.secret_key', '')
+        self.api_url = 'https://tsn.baidu.com/text2audio'
+        self.token_url = 'https://aip.baidubce.com/oauth/2.0/token'
+        self.access_token = None
 
-    async def generate_speech(self, text: str, output_path: str, **kwargs) -> Dict[str, Any]:
-        """使用科大讯飞生成语音"""
+    async def _get_access_token(self) -> Optional[str]:
+        """获取百度API访问令牌"""
         try:
-            if not all([self.app_id, self.api_key, self.api_secret]):
-                return {
-                    'success': False,
-                    'error': '科大讯飞API配置不完整'
-                }
+            if not all([self.api_key, self.secret_key]):
+                return None
 
-            voice = kwargs.get('voice', 'xiaoyan')
-            speed = kwargs.get('speed', 1.0)
-
-            # 确保输出目录存在
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-            # 构建请求参数
-            import time
-            import hashlib
-            import hmac
-            import base64
-
-            # 生成时间戳
-            ts = str(int(time.time()))
-
-            # 构建签名
-            signature_origin = f"host: tts-api.xfyun.cn\ndate: {ts}\nGET /v2/tts HTTP/1.1"
-            signature_sha = hmac.new(
-                str(self.api_secret).encode('utf-8'),
-                signature_origin.encode('utf-8'),
-                digestmod=hashlib.sha256
-            ).digest()
-            signature = base64.b64encode(signature_sha).decode()
-
-            # 构建authorization
-            authorization_origin = f'api_key="{self.api_key}", algorithm="hmac-sha256", headers="host date request-line", signature="{signature}"'
-            authorization = base64.b64encode(authorization_origin.encode('utf-8')).decode()
-
-            # 构建请求头
-            headers = {
-                'Authorization': authorization,
-                'Date': ts,
-                'Host': 'tts-api.xfyun.cn'
+            params = {
+                'grant_type': 'client_credentials',
+                'client_id': self.api_key,
+                'client_secret': self.secret_key
             }
 
-            # 构建请求数据
-            data = {
-                'common': {
-                    'app_id': self.app_id
-                },
-                'business': {
-                    'aue': 'mp3',
-                    'vcn': voice,
-                    'speed': int(speed * 50),
-                    'volume': int(kwargs.get('volume', 1.0) * 50),
-                    'pitch': int(kwargs.get('pitch', 0) + 50),
-                    'bgs': 0
-                },
-                'data': {
-                    'status': 2,
-                    'text': base64.b64encode(text.encode('utf-8')).decode()
-                }
-            }
-
-            # 发送请求
-            response = requests.post(self.api_url, json=data, headers=headers, timeout=30)
+            response = requests.post(self.token_url, params=params, timeout=10)
 
             if response.status_code == 200:
                 result = response.json()
-
-                if result.get('code') == 0:
-                    # 解码音频数据
-                    audio_data = base64.b64decode(result['data']['audio'])
-
-                    with open(output_path, 'wb') as f:
-                        f.write(audio_data)
-
-                    return {
-                        'success': True,
-                        'audio_file': output_path,
-                        'engine': 'xunfei',
-                        'voice': voice
-                    }
-                else:
-                    return {
-                        'success': False,
-                        'error': f'科大讯飞API错误: {result.get("message", "未知错误")}'
-                    }
+                self.access_token = result.get('access_token')
+                return self.access_token
             else:
-                return {
-                    'success': False,
-                    'error': f'科大讯飞API请求失败: {response.status_code}'
-                }
+                logger.error(f"获取百度访问令牌失败: {response.status_code}")
+                return None
 
         except Exception as e:
-            logger.error(f"科大讯飞生成失败: {e}")
-            return {
-                'success': False,
-                'error': f'科大讯飞生成失败: {str(e)}'
-            }
-
-    def get_available_voices(self) -> List[Dict[str, str]]:
-        """获取科大讯飞可用音色"""
-        return [
-            {'id': 'xiaoyan', 'name': '小燕-女声', 'language': 'zh-CN'},
-            {'id': 'xiaoyu', 'name': '小宇-男声', 'language': 'zh-CN'},
-            {'id': 'xiaofeng', 'name': '小峰-男声', 'language': 'zh-CN'},
-            {'id': 'xiaomei', 'name': '小美-女声', 'language': 'zh-CN'},
-        ]
-
-    def test_connection(self) -> Dict[str, Any]:
-        """测试科大讯飞连接"""
-        try:
-            if not all([self.app_id, self.api_key, self.api_secret]):
-                return {
-                    'success': False,
-                    'error': '科大讯飞API配置不完整'
-                }
-
-            return {
-                'success': True,
-                'message': '科大讯飞配置正常'
-            }
-
-        except Exception as e:
-            return {
-                'success': False,
-                'error': str(e)
-            }
-
-    def get_default_settings(self) -> Dict[str, Any]:
-        """获取科大讯飞默认设置"""
-        return {
-            'voice': 'xiaoyan',
-            'speed': 1.0,
-            'pitch': 0,
-            'volume': 1.0,
-            'language': 'zh-CN',
-            'app_id': self.app_id,
-            'api_key': self.api_key,
-            'api_secret': self.api_secret
-        }
-
-
-class ElevenLabsEngine(TTSEngineBase):
-    """ElevenLabs引擎"""
-
-    def __init__(self, config_manager: ConfigManager):
-        super().__init__(config_manager)
-        self.api_key = self.config_manager.get_setting('elevenlabs.api_key', '')
-        self.api_url = 'https://api.elevenlabs.io/v1/text-to-speech'
+            logger.error(f"获取百度访问令牌异常: {e}")
+            return None
 
     async def generate_speech(self, text: str, output_path: str, **kwargs) -> Dict[str, Any]:
-        """使用ElevenLabs生成语音"""
+        """使用百度智能云生成语音"""
         try:
-            if not self.api_key:
+            if not all([self.api_key, self.secret_key]):
                 return {
                     'success': False,
-                    'error': 'ElevenLabs API Key未配置'
+                    'error': '百度智能云API配置不完整'
                 }
 
-            voice_id = kwargs.get('voice', 'pNInz6obpgDQGcFmaJgB')  # Adam voice
+            # 获取访问令牌
+            if not self.access_token:
+                self.access_token = await self._get_access_token()
+
+            if not self.access_token:
+                return {
+                    'success': False,
+                    'error': '无法获取百度API访问令牌'
+                }
 
             # 确保输出目录存在
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             # 构建请求数据
-            data = {
-                'text': text,
-                'voice_settings': {
-                    'stability': kwargs.get('stability', 0.5),
-                    'similarity_boost': kwargs.get('similarity_boost', 0.5),
-                    'style': kwargs.get('style', 0.0),
-                    'use_speaker_boost': kwargs.get('use_speaker_boost', True)
-                }
+            voice = kwargs.get('voice', '4')  # 默认度丫丫
+            speed = kwargs.get('speed', 1.0)
+            pitch = kwargs.get('pitch', 0)
+            volume = kwargs.get('volume', 1.0)
+            emotion = kwargs.get('emotion', 'neutral')
+
+            # 百度TTS参数映射
+            per_map = {
+                '0': '度小美-女声',
+                '1': '度小宇-男声',
+                '3': '度逍遥-男声',
+                '4': '度丫丫-女声',
+                '103': '度米朵-女声',
+                '106': '度博文-男声',
+                '110': '度小娇-女声',
+                '111': '度小萌-女声'
             }
 
-            headers = {
-                'xi-api-key': self.api_key,
-                'Content-Type': 'application/json'
+            data = {
+                'tex': text,
+                'tok': self.access_token,
+                'cuid': 'video_creator',
+                'ctp': '1',
+                'lan': 'zh',
+                'per': voice,
+                'spd': int(speed * 5),  # 语速1-15
+                'pit': int(pitch + 5),  # 音调0-15
+                'vol': int(volume * 15),  # 音量0-15
+                'aue': '3'  # MP3格式
             }
 
             # 发送请求
-            response = requests.post(
-                f"{self.api_url}/{voice_id}",
-                json=data,
-                headers=headers,
-                timeout=30
-            )
+            response = requests.post(self.api_url, data=data, timeout=30)
 
             if response.status_code == 200:
-                with open(output_path, 'wb') as f:
-                    f.write(response.content)
+                # 检查响应是否为音频数据
+                content_type = response.headers.get('Content-Type', '')
+                if 'audio' in content_type:
+                    with open(output_path, 'wb') as f:
+                        f.write(response.content)
 
-                return {
-                    'success': True,
-                    'audio_file': output_path,
-                    'engine': 'elevenlabs',
-                    'voice': voice_id
-                }
+                    logger.info(f"百度TTS语音生成成功: {output_path}")
+                    return {
+                        'success': True,
+                        'audio_file': output_path,
+                        'engine': 'baidu_tts',
+                        'voice': voice
+                    }
+                else:
+                    # 可能是错误响应
+                    try:
+                        error_result = response.json()
+                        return {
+                            'success': False,
+                            'error': f'百度TTS错误: {error_result.get("err_msg", "未知错误")}'
+                        }
+                    except:
+                        return {
+                            'success': False,
+                            'error': '百度TTS返回非音频数据'
+                        }
             else:
                 return {
                     'success': False,
-                    'error': f'ElevenLabs API请求失败: {response.status_code}'
+                    'error': f'百度TTS API请求失败: {response.status_code}'
                 }
 
         except Exception as e:
-            logger.error(f"ElevenLabs生成失败: {e}")
+            logger.error(f"百度TTS语音生成失败: {e}")
             return {
                 'success': False,
-                'error': f'ElevenLabs生成失败: {str(e)}'
+                'error': str(e)
             }
 
     def get_available_voices(self) -> List[Dict[str, str]]:
-        """获取ElevenLabs可用音色"""
+        """获取可用音色列表"""
         return [
-            {'id': 'pNInz6obpgDQGcFmaJgB', 'name': 'Adam-Male', 'language': 'en-US'},
-            {'id': 'EXAVITQu4vr4xnSDxMaL', 'name': 'Bella-Female', 'language': 'en-US'},
-            {'id': 'VR6AewLTigWG4xSOukaG', 'name': 'Arnold-Male', 'language': 'en-US'},
-            {'id': 'pqHfZKP75CvOlQylNhV4', 'name': 'Bill-Male', 'language': 'en-US'},
+            # 基础音库
+            {'id': '0', 'name': '度小美 (温柔女声)', 'language': 'zh-CN'},
+            {'id': '1', 'name': '度小宇 (亲切男声)', 'language': 'zh-CN'},
+            {'id': '3', 'name': '度逍遥 (磁性男声)', 'language': 'zh-CN'},
+            {'id': '4', 'name': '度丫丫 (萌萌女声)', 'language': 'zh-CN'},
+            # 精品音库
+            {'id': '103', 'name': '度米朵 (温暖女声)', 'language': 'zh-CN'},
+            {'id': '106', 'name': '度博文 (知性男声)', 'language': 'zh-CN'},
+            {'id': '110', 'name': '度小娇 (甜美女声)', 'language': 'zh-CN'},
+            {'id': '111', 'name': '度小萌 (萝莉女声)', 'language': 'zh-CN'},
+            {'id': '5003', 'name': '度小鹿 (温柔女声)', 'language': 'zh-CN'},
+            {'id': '5118', 'name': '度小雯 (知性女声)', 'language': 'zh-CN'}
         ]
 
     def test_connection(self) -> Dict[str, Any]:
-        """测试ElevenLabs连接"""
+        """测试百度TTS连接"""
         try:
-            if not self.api_key:
+            if not all([self.api_key, self.secret_key]):
                 return {
                     'success': False,
-                    'error': 'ElevenLabs API Key未配置'
+                    'error': '百度智能云API配置不完整'
                 }
 
-            # 测试API连接
-            headers = {
-                'xi-api-key': str(self.api_key)
-            }
+            # 测试获取访问令牌
+            import asyncio
+            token = asyncio.run(self._get_access_token())
 
-            response = requests.get(
-                'https://api.elevenlabs.io/v1/voices',
-                headers=headers,
-                timeout=10
-            )
-
-            if response.status_code == 200:
+            if token:
                 return {
                     'success': True,
-                    'message': 'ElevenLabs连接正常'
+                    'message': '百度TTS连接正常'
                 }
             else:
                 return {
                     'success': False,
-                    'error': f'ElevenLabs连接失败: {response.status_code}'
+                    'error': '百度TTS连接失败'
                 }
 
         except Exception as e:
@@ -719,15 +816,16 @@ class ElevenLabsEngine(TTSEngineBase):
             }
 
     def get_default_settings(self) -> Dict[str, Any]:
-        """获取ElevenLabs默认设置"""
+        """获取百度TTS默认设置"""
         return {
-            'voice': 'pNInz6obpgDQGcFmaJgB',
-            'stability': 0.5,
-            'similarity_boost': 0.5,
-            'style': 0.0,
-            'use_speaker_boost': True,
-            'language': 'en-US',
-            'api_key': self.api_key
+            'voice': '4',
+            'speed': 1.0,
+            'pitch': 0,
+            'volume': 1.0,
+            'emotion': 'neutral',
+            'language': 'zh-CN',
+            'api_key': self.api_key,
+            'secret_key': self.secret_key
         }
 
 
@@ -744,9 +842,9 @@ class TTSEngineManager:
         self.engines = {
             'edge_tts': EdgeTTSEngine(self.config_manager),
             'cosyvoice': CosyVoiceEngine(self.config_manager),
-            'ttsmaker': TTSMakerEngine(self.config_manager),
-            'xunfei': XunfeiEngine(self.config_manager),
-            'elevenlabs': ElevenLabsEngine(self.config_manager)
+            'azure_speech': AzureSpeechEngine(self.config_manager),
+            'google_tts': GoogleTTSEngine(self.config_manager),
+            'baidu_tts': BaiduTTSEngine(self.config_manager)
         }
 
     def get_engine(self, engine_name: str) -> Optional[TTSEngineBase]:

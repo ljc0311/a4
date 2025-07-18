@@ -2511,12 +2511,19 @@ class VideoGenerationTab(QWidget):
 
             self.status_label.setText(status_msg)
 
-            # 显示完成消息
-            if failed_count == 0:
-                QMessageBox.information(self, "完成", f"批量图像处理完成！\n成功处理 {success_count} 个镜头。")
-            else:
-                QMessageBox.warning(self, "部分完成",
-                    f"批量图像处理完成！\n成功: {success_count}\n失败: {failed_count}\n总计: {total_count}")
+            # 使用QTimer延迟显示完成消息，避免阻塞UI
+            def show_completion_message():
+                try:
+                    if failed_count == 0:
+                        QMessageBox.information(self, "完成", f"批量图像处理完成！\n成功处理 {success_count} 个镜头。")
+                    else:
+                        QMessageBox.warning(self, "部分完成",
+                            f"批量图像处理完成！\n成功: {success_count}\n失败: {failed_count}\n总计: {total_count}")
+                except Exception as msg_error:
+                    logger.error(f"显示完成消息失败: {msg_error}")
+
+            # 延迟500ms显示消息，确保UI状态更新完成
+            QTimer.singleShot(500, show_completion_message)
 
             logger.info(f"批量图像处理完成: 成功 {success_count}, 失败 {failed_count}, 总计 {total_count}")
 
@@ -3496,11 +3503,18 @@ class VideoGenerationTab(QWidget):
 
             self.status_label.setText(f"所有生成任务完成！成功: {completed_count}, 失败: {failed_count}, 总计: {total_count}")
 
-            # 显示完成通知
-            if failed_count == 0:
-                QMessageBox.information(self, "完成", f"所有 {completed_count} 个视频生成完成！")
-            else:
-                QMessageBox.warning(self, "完成", f"生成完成！成功: {completed_count}, 失败: {failed_count}")
+            # 使用QTimer延迟显示完成通知，避免阻塞UI
+            def show_completion_notification():
+                try:
+                    if failed_count == 0:
+                        QMessageBox.information(self, "完成", f"所有 {completed_count} 个视频生成完成！")
+                    else:
+                        QMessageBox.warning(self, "完成", f"生成完成！成功: {completed_count}, 失败: {failed_count}")
+                except Exception as msg_error:
+                    logger.error(f"显示完成通知失败: {msg_error}")
+
+            # 延迟500ms显示通知，确保UI状态更新完成
+            QTimer.singleShot(500, show_completion_notification)
 
             logger.info(f"所有视频生成任务完成 - 成功: {completed_count}, 失败: {failed_count}")
 

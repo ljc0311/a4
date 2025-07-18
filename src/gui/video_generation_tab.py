@@ -3300,11 +3300,11 @@ class VideoGenerationTab(QWidget):
     def update_scene_status(self, scene_data, status):
         """更新场景状态"""
         try:
-            logger.info(f"尝试更新场景状态: {scene_data.get('shot_id', 'unknown')} -> {status}")
+            target_shot_id = scene_data.get('shot_id', '')
+            logger.info(f"尝试更新场景状态: {target_shot_id} -> {status}")
 
             # 在场景列表中找到对应场景并更新状态
             scene_found = False
-            target_shot_id = scene_data.get('shot_id', '')
 
             for i, scene in enumerate(self.current_scenes):
                 # 使用多种方式匹配场景，优先使用shot_id精确匹配
@@ -3314,33 +3314,60 @@ class VideoGenerationTab(QWidget):
                 # 方式1：通过shot_id精确匹配（最优先）
                 if target_shot_id and current_shot_id and target_shot_id == current_shot_id:
                     scene_match = True
-                    logger.debug(f"通过shot_id匹配场景: {target_shot_id}")
+                    logger.debug(f"通过shot_id精确匹配场景: {target_shot_id}")
 
                 # 方式2：通过scene_id和shot_id匹配
                 elif (scene.get('scene_id') == scene_data.get('scene_id') and
                       scene.get('shot_id') == scene_data.get('shot_id')):
                     scene_match = True
-                    logger.debug(f"通过scene_id+shot_id匹配场景")
+                    logger.debug(f"通过scene_id+shot_id匹配场景: {target_shot_id}")
 
                 # 方式3：通过scene_index和shot_index匹配（兼容旧格式）
                 elif (scene.get('scene_index') == scene_data.get('scene_index') and
                       scene.get('shot_index') == scene_data.get('shot_index')):
                     scene_match = True
-                    logger.debug(f"通过索引匹配场景")
+                    logger.debug(f"通过索引匹配场景: {target_shot_id}")
+
+                # 方式4：通过索引位置匹配（最后的兜底方案）
+                elif not scene_match and target_shot_id:
+                    # 尝试从shot_id中提取数字索引进行匹配
+                    try:
+                        # 提取target_shot_id中的数字部分
+                        import re
+                        target_match = re.search(r'(\d+)', target_shot_id)
+                        current_match = re.search(r'(\d+)', current_shot_id) if current_shot_id else None
+
+                        if target_match and current_match:
+                            target_num = int(target_match.group(1))
+                            current_num = int(current_match.group(1))
+                            if target_num == current_num:
+                                scene_match = True
+                                logger.debug(f"通过数字索引匹配场景: {target_shot_id} -> {current_shot_id}")
+                        elif target_match:
+                            # 如果只有target有数字，尝试按位置匹配
+                            target_num = int(target_match.group(1))
+                            if i + 1 == target_num:  # 索引从0开始，但编号从1开始
+                                scene_match = True
+                                logger.debug(f"通过位置索引匹配场景: {target_shot_id} -> 位置{i+1}")
+                    except (ValueError, AttributeError):
+                        pass
 
                 if scene_match:
                     scene['status'] = status
                     scene_found = True
-                    logger.info(f"成功更新场景状态: {scene.get('shot_id', 'unknown')} -> {status}")
+                    logger.info(f"成功更新场景状态: {target_shot_id} -> {status} (匹配到: {current_shot_id})")
                     # 刷新表格显示
                     self.update_scene_table()
                     break
 
             if not scene_found:
-                logger.warning(f"未找到匹配的场景，无法更新状态: {target_shot_id}, 可用场景: {[s.get('shot_id', 'unknown') for s in self.current_scenes]}")
+                logger.warning(f"未找到匹配的场景，无法更新状态: {target_shot_id}")
+                logger.debug(f"可用场景列表: {[s.get('shot_id', f'index_{i}') for i, s in enumerate(self.current_scenes)]}")
 
         except Exception as e:
             logger.error(f"更新场景状态失败: {e}")
+            import traceback
+            logger.error(f"错误详情: {traceback.format_exc()}")
 
     def on_concurrent_progress_updated(self, scene_id, progress, message):
         """并发进度更新"""

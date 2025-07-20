@@ -1,0 +1,49 @@
+# AI视频创作工具依赖包
+# 支持文本到视频的完整创作流程，包括语音生成、图像生成、视频生成和多平台发布
+
+# ===== 核心框架 =====
+PyQt5>=5.15.0
+
+# ===== 网络和HTTP =====
+requests>=2.28.0
+aiohttp>=3.8.0
+
+# ===== 网页自动化 =====
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+
+# ===== 图像和视频处理 =====
+Pillow>=9.0.0
+opencv-python>=4.8.0
+numpy>=1.21.0
+moviepy>=1.0.3
+
+# ===== 音频处理 =====
+pydub>=0.25.0
+
+# ===== 网页解析 =====
+beautifulsoup4>=4.11.0
+
+# ===== 系统工具 =====
+pyperclip>=1.8.0
+psutil>=5.9.0
+tqdm>=4.64.0
+colorama>=0.4.0
+
+# ===== 数据处理 =====
+python-dateutil>=2.8.0
+
+# ===== 安全和加密 =====
+cryptography>=3.4.0
+
+# ===== 平台API =====
+google-api-python-client>=2.70.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=0.7.0
+
+# ===== 文本处理 =====
+chardet>=5.0.0
+
+# ===== 开发工具 =====
+python-dotenv>=0.20.0
+typing_extensions>=4.3.0

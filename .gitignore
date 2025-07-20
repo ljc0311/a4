@@ -1,0 +1,164 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Output files
+output/
+backups/
+auto_save/
+
+# Configuration files with sensitive data
+config/app_settings.json
+config/baidu_translate_config.py
+config/llm_config.json
+config/tts_config.json
+config/video_generation_config.py
+config/image_generation_config.py
+config/youtube_config.py
+config/translation_config.py
+config/.encryption_key
+config/secure_config.enc
+config/config.json
+config/youtube_credentials.json
+config/youtube_token.pickle
+
+# Google/YouTube API credentials and tokens
+**/client_secret*.json
+**/credentials*.json
+**/token*.pickle
+**/oauth*.json
+**/*_credentials.json
+**/*_token.pickle
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+.env.shared
+.env.secret
+
+# API keys and sensitive data
+**/api_key*
+**/secret*
+**/*_key*
+**/*_token*
+**/*_password*
+
+# Cache
+*_cache/
+cache/
+
+# FFmpeg (if it's a large binary)
+ffmpeg/bin/
+ffmpeg/doc/
+
+# Sound library (if files are large)
+sound_library/
+
+# Test results
+test_*.py
+
+# System files
+*.pid
+*.seed
+*.pid.lock
+
+# Browser data and selenium
+selenium_chrome_data/
+chromedriver-win64/
+chromedriver.exe
+
+# Data directories
+data/
+
+# Chrome debug files
+start_chrome_debug.bat
+
+# Publisher specific
+config/publisher_config.py
+
+# Additional configuration files
+config/display_settings.json
+config/enhancer_config.json
+config/system_settings.json
+
+# Browser and selenium data
+browser_data/
+selenium/
+browser_config.json
+
+# Edge browser data
+**/edge/
+**/Edge/
+**/History
+**/Cookies
+**/Login Data
+**/Web Data
+
+# Backup files
+backup/
+backup_*/
+cleanup_backup/
+project_backup_*.zip
+
+# Cleanup and temporary scripts
+cleanup_*.py
+safe_cleanup_*.py
+
+# Chrome driver and browser files
+drivers/chromedriver.exe
+
+# User data directories
+user_data/

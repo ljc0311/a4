@@ -1,0 +1,51 @@
+{
+  "character_consistency": {
+    "appearance_keywords": [
+      "外貌",
+      "长相",
+      "身材",
+      "发型",
+      "眼睛",
+      "肤色"
+    ],
+    "clothing_keywords": [
+      "服装",
+      "衣服",
+      "穿着",
+      "打扮",
+      "装扮"
+    ],
+    "personality_keywords": [
+      "性格",
+      "气质",
+      "表情",
+      "神态",
+      "情绪"
+    ]
+  },
+  "scene_consistency": {
+    "environment_keywords": [
+      "环境",
+      "背景",
+      "场所",
+      "地点",
+      "位置"
+    ],
+    "lighting_keywords": [
+      "光线",
+      "照明",
+      "明暗",
+      "阴影",
+      "光影"
+    ],
+    "atmosphere_keywords": [
+      "氛围",
+      "气氛",
+      "情调",
+      "感觉",
+      "风格"
+    ]
+  },
+  "last_updated": "",
+  "version": "1.0"
+}

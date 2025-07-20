@@ -1,0 +1,29 @@
+{
+  "cookies": [
+    {
+      "name": "wxuin",
+      "value": "mock_value_123",
+      "domain": ".weixin.qq.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": true
+    },
+    {
+      "name": "wxsid",
+      "value": "mock_session_456",
+      "domain": ".weixin.qq.com",
+      "path": "/",
+      "secure": true,
+      "httpOnly": true
+    }
+  ],
+  "local_storage": {
+    "user_info": "mock_user_data"
+  },
+  "session_storage": {
+    "session_id": "mock_session_789"
+  },
+  "timestamp": "2025-07-19T10:40:00.000Z",
+  "platform": "wechat",
+  "version": "1.0"
+}

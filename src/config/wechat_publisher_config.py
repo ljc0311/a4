@@ -48,6 +48,62 @@ WECHAT_SELECTORS = {
         '//div[contains(text(), "大小不超过20GB")]//ancestor::div[3]//input[@type="file"]',
 
         # 🎯 基于上传区域的通用选择器
+
+        # 🆕 2024年12月增强选择器 - 基于全网搜索的最新解决方案
+        'input[type="file"]',  # 最基础的文件输入框
+        'input[accept*="video"]',  # 接受视频的输入框
+        'input[accept*=".mp4"]',  # 接受MP4的输入框
+        'input[accept*="video/mp4"]',  # 接受video/mp4的输入框
+        '[data-testid*="upload"] input[type="file"]',  # 测试ID包含upload的输入框
+        '[class*="upload"] input[type="file"]',  # 类名包含upload的输入框
+        '[id*="upload"] input[type="file"]',  # ID包含upload的输入框
+        'div[class*="upload"] input',  # upload div中的输入框
+        'form input[type="file"]',  # 表单中的文件输入框
+
+        # 🆕 现代Web应用常见的隐藏文件输入框
+        'input[type="file"][style*="display: none"]',  # 隐藏的文件输入框
+        'input[type="file"][style*="opacity: 0"]',  # 透明的文件输入框
+        'input[type="file"][style*="position: absolute"]',  # 绝对定位的文件输入框
+        'input[type="file"][hidden]',  # 带hidden属性的输入框
+
+        # 🆕 基于React/Vue等现代框架的选择器
+        '[data-reactroot] input[type="file"]',  # React应用中的文件输入框
+        '[data-v-] input[type="file"]',  # Vue应用中的文件输入框
+        'div[class*="react"] input[type="file"]',  # React组件中的输入框
+        'div[class*="vue"] input[type="file"]',  # Vue组件中的输入框
+
+        # 🆕 基于拖拽上传的选择器
+        '[class*="drop-zone"] input[type="file"]',  # 拖拽区域中的输入框
+        '[class*="drag-drop"] input[type="file"]',  # 拖拽上传区域
+        '[class*="upload-area"] input[type="file"]',  # 上传区域
+        'div[ondrop] input[type="file"]',  # 支持拖拽的区域
+        'div[ondragover] input[type="file"]',  # 支持拖拽悬停的区域
+
+        # 🆕 基于ARIA标签的无障碍选择器
+        '[aria-label*="上传"] input[type="file"]',  # ARIA标签包含上传
+        '[aria-label*="upload"] input[type="file"]',  # ARIA标签包含upload
+        '[role="button"][aria-label*="上传"] input[type="file"]',  # 按钮角色的上传元素
+
+        # 🆕 基于微信特有文本的增强选择器
+        '//div[contains(text(), "选择文件")]//ancestor::*//input[@type="file"]',
+        '//div[contains(text(), "选择视频")]//ancestor::*//input[@type="file"]',
+        '//div[contains(text(), "点击上传")]//ancestor::*//input[@type="file"]',
+        '//div[contains(text(), "拖拽文件")]//ancestor::*//input[@type="file"]',
+        '//div[contains(text(), "支持MP4")]//ancestor::*//input[@type="file"]',
+        '//div[contains(text(), "H.264")]//ancestor::*//input[@type="file"]',
+
+        # 🆕 基于页面结构的深度查找
+        '//div[contains(@class, "upload")]//descendant::input[@type="file"]',
+        '//div[contains(@id, "upload")]//descendant::input[@type="file"]',
+        '//form//descendant::input[@type="file"]',
+        '//div[@role="main"]//descendant::input[@type="file"]',
+        '//main//descendant::input[@type="file"]',
+
+        # 🆕 基于兄弟元素的查找
+        '//button[contains(text(), "上传")]//following-sibling::*//input[@type="file"]',
+        '//button[contains(text(), "上传")]//preceding-sibling::*//input[@type="file"]',
+        '//span[contains(text(), "上传")]//following-sibling::*//input[@type="file"]',
+        '//span[contains(text(), "上传")]//preceding-sibling::*//input[@type="file"]'
         '//div[contains(@class, "upload")]//input[@type="file"]',
         '//div[contains(@class, "upload-area")]//input[@type="file"]',
         '//div[contains(@class, "upload-zone")]//input[@type="file"]',

@@ -9,7 +9,12 @@ from typing import Dict, Any, Optional
 from .selenium_publisher_base import SeleniumPublisherBase
 from .selenium_douyin_publisher import SeleniumDouyinPublisher
 from .selenium_bilibili_publisher import SeleniumBilibiliPublisher
-from .selenium_kuaishou_publisher import SeleniumKuaishouPublisher
+# 已删除重复的快手发布器导入：
+# - selenium_kuaishou_publisher (旧版，已被simple_chrome版本替代)
+# - enhanced_kuaishou_publisher (实验性，未被使用)
+# - firefox_kuaishou_publisher (实验性，未被使用)
+from .simple_chrome_kuaishou_publisher import SimpleChromeKuaishouPublisher
+from .fallback_chrome_kuaishou_publisher import FallbackChromeKuaishouPublisher
 from .selenium_xiaohongshu_publisher import SeleniumXiaohongshuPublisher
 from .selenium_wechat_publisher import SeleniumWechatPublisher
 from .selenium_youtube_publisher import SeleniumYoutubePublisher
@@ -23,7 +28,8 @@ class SeleniumPublisherFactory:
     SUPPORTED_PLATFORMS = {
         'douyin': SeleniumDouyinPublisher,
         'bilibili': SeleniumBilibiliPublisher,
-        'kuaishou': SeleniumKuaishouPublisher,
+        'kuaishou_simple': SimpleChromeKuaishouPublisher, # 简化版Chrome快手发布器（推荐）
+        'kuaishou_fallback': FallbackChromeKuaishouPublisher, # 备用Chrome快手发布器（故障恢复）
         'xiaohongshu': SeleniumXiaohongshuPublisher,
         'wechat': SeleniumWechatPublisher,
         'youtube': SeleniumYoutubePublisher,
@@ -40,7 +46,7 @@ class SeleniumPublisherFactory:
                 
             publisher_class = cls.SUPPORTED_PLATFORMS[platform]
             
-            # 🔧 优化：根据平台选择默认浏览器
+            # 🔧 优化：根据平台选择默认配置
             if platform == 'wechat':
                 # 微信平台使用Chrome（与用户测试环境保持一致）
                 default_config = {
@@ -51,6 +57,26 @@ class SeleniumPublisherFactory:
                     'simulation_mode': False,
                     'user_friendly': True
                 }
+            elif platform in ['kuaishou_simple', 'kuaishou_fallback']:
+                # 简化版和备用Chrome快手发布器专用配置
+                default_config = {
+                    'driver_type': 'chrome',
+                    'timeout': 30,
+                    'implicit_wait': 10,
+                    'headless': False,
+                    'simulation_mode': False,  # 实际发布时设为False
+                    'use_stealth': True,       # 启用selenium-stealth反检测
+                    'disable_images': False,   # 可选：禁用图片加载提高速度
+                    'user_friendly': True
+                }
+
+                # 备用发布器的额外配置
+                if platform == 'kuaishou_fallback':
+                    default_config.update({
+                        'max_init_retries': 3,        # 最大重试次数
+                        'fallback_to_simulation': True, # 失败时回退到模拟模式
+                        'init_timeout': 60            # 初始化超时时间
+                    })
             else:
                 # 其他平台使用Firefox
                 default_config = {

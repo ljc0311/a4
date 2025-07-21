@@ -87,12 +87,43 @@ class SeleniumPublisherBase(ABC):
 
             driver_type = self.selenium_config.get('driver_type', 'firefox')
 
-            if driver_type == 'chrome':
-                self._init_chrome_driver()
-            elif driver_type == 'firefox':
-                self._init_firefox_driver()
+            # 🆕 优先使用Firefox，如果失败再尝试Chrome
+            browsers_to_try = []
+            if driver_type == 'firefox':
+                browsers_to_try = ['firefox', 'chrome']
+            elif driver_type == 'chrome':
+                browsers_to_try = ['firefox', 'chrome']  # 仍然优先尝试Firefox
             else:
-                raise ValueError(f"不支持的驱动类型: {driver_type}")
+                browsers_to_try = ['firefox', 'chrome']
+
+            last_error = None
+            for browser in browsers_to_try:
+                try:
+                    logger.info(f"🌐 尝试使用 {browser.upper()} 浏览器...")
+                    if browser == 'firefox':
+                        self._init_firefox_driver()
+                    elif browser == 'chrome':
+                        self._init_chrome_driver()
+
+                    # 如果成功，跳出循环
+                    logger.info(f"✅ {browser.upper()} 浏览器启动成功")
+                    break
+
+                except Exception as e:
+                    logger.warning(f"⚠️ {browser.upper()} 浏览器启动失败: {e}")
+                    last_error = e
+                    # 清理失败的驱动
+                    try:
+                        if hasattr(self, 'driver') and self.driver:
+                            self.driver.quit()
+                            self.driver = None
+                    except:
+                        pass
+                    continue
+
+            # 如果所有浏览器都失败了
+            if not hasattr(self, 'driver') or not self.driver:
+                raise Exception(f"所有浏览器都无法启动，最后错误: {last_error}")
 
             # 设置等待（只有在驱动创建成功后才设置）
             if self.driver:
@@ -323,6 +354,19 @@ class SeleniumPublisherBase(ABC):
         try:
             options = FirefoxOptions()
 
+            # 🔧 新增：使用专用的用户配置文件目录保持登录状态
+            if self.platform_name == 'wechat':
+                from pathlib import Path
+
+                # 创建专用的Firefox配置文件目录
+                profile_dir = Path.cwd() / "data" / "browser_profiles" / "firefox_wechat"
+                profile_dir.mkdir(parents=True, exist_ok=True)
+
+                # 使用-profile参数指定配置文件目录
+                options.add_argument(f"-profile")
+                options.add_argument(str(profile_dir))
+                logger.info(f"🔧 使用Firefox专用配置文件: {profile_dir}")
+
             # 🔧 修复：基本配置，避免使用可能导致问题的配置项
             if self.selenium_config.get('headless', False):
                 options.add_argument('--headless')
@@ -340,6 +384,16 @@ class SeleniumPublisherBase(ABC):
             options.set_preference("dom.webnotifications.enabled", False)
             options.set_preference("media.navigator.enabled", False)
             options.set_preference("geo.enabled", False)
+
+            # 🔧 新增：微信平台专用设置
+            if self.platform_name == 'wechat':
+                # 允许所有cookies
+                options.set_preference("network.cookie.cookieBehavior", 0)
+                # 禁用跟踪保护
+                options.set_preference("privacy.trackingprotection.enabled", False)
+                # 允许混合内容
+                options.set_preference("security.mixed_content.block_active_content", False)
+                options.set_preference("security.mixed_content.block_display_content", False)
 
             # 🔧 修复：简化日志配置
             options.add_argument("--log-level=3")
@@ -508,7 +562,7 @@ class SeleniumPublisherBase(ABC):
             logger.warning(f"页面就绪检测失败: {e}")
 
     def save_login_state(self):
-        """🔧 优化：保存登录状态到数据库"""
+        """🔧 优化：保存完整登录状态到数据库（包含localStorage和sessionStorage）"""
         try:
             if not self.driver:
                 return
@@ -520,9 +574,41 @@ class SeleniumPublisherBase(ABC):
             current_url = self.driver.current_url
             page_title = self.driver.title
 
-            # 保存登录状态到数据库
+            # 🔧 新增：获取localStorage
+            local_storage = {}
+            try:
+                local_storage = self.driver.execute_script("""
+                    var storage = {};
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var key = localStorage.key(i);
+                        storage[key] = localStorage.getItem(key);
+                    }
+                    return storage;
+                """)
+                logger.debug(f"📦 获取到 {len(local_storage)} 个localStorage项目")
+            except Exception as e:
+                logger.warning(f"获取localStorage失败: {e}")
+
+            # 🔧 新增：获取sessionStorage
+            session_storage = {}
+            try:
+                session_storage = self.driver.execute_script("""
+                    var storage = {};
+                    for (var i = 0; i < sessionStorage.length; i++) {
+                        var key = sessionStorage.key(i);
+                        storage[key] = sessionStorage.getItem(key);
+                    }
+                    return storage;
+                """)
+                logger.debug(f"📦 获取到 {len(session_storage)} 个sessionStorage项目")
+            except Exception as e:
+                logger.warning(f"获取sessionStorage失败: {e}")
+
+            # 保存完整登录状态到数据库
             login_state = {
                 'cookies': cookies,
+                'local_storage': local_storage,  # 🔧 新增
+                'session_storage': session_storage,  # 🔧 新增
                 'current_url': current_url,
                 'page_title': page_title,
                 'timestamp': time.time(),
@@ -536,7 +622,8 @@ class SeleniumPublisherBase(ABC):
             # 使用数据库服务保存
             success = self.db_service.save_login_state(self.platform_name, login_state)
             if success:
-                logger.info(f"✅ {self.platform_name} 登录状态已保存到数据库")
+                logger.info(f"✅ {self.platform_name} 完整登录状态已保存到数据库")
+                logger.info(f"📊 保存内容: Cookies={len(cookies)}, LocalStorage={len(local_storage)}, SessionStorage={len(session_storage)}")
             else:
                 logger.error(f"❌ 保存 {self.platform_name} 登录状态到数据库失败")
 
@@ -583,11 +670,36 @@ class SeleniumPublisherBase(ABC):
 
             logger.info(f"🍪 Cookies恢复情况: 成功{cookies_added}个, 失败{cookies_failed}个")
 
-            # 刷新页面以应用cookies
+            # 🔧 新增：恢复localStorage
+            local_storage_restored = 0
+            local_storage = login_state.get('local_storage', {})
+            if local_storage:
+                try:
+                    for key, value in local_storage.items():
+                        self.driver.execute_script(f"localStorage.setItem(arguments[0], arguments[1]);", key, value)
+                        local_storage_restored += 1
+                    logger.info(f"📦 LocalStorage恢复: {local_storage_restored}个项目")
+                except Exception as e:
+                    logger.warning(f"恢复localStorage失败: {e}")
+
+            # 🔧 新增：恢复sessionStorage
+            session_storage_restored = 0
+            session_storage = login_state.get('session_storage', {})
+            if session_storage:
+                try:
+                    for key, value in session_storage.items():
+                        self.driver.execute_script(f"sessionStorage.setItem(arguments[0], arguments[1]);", key, value)
+                        session_storage_restored += 1
+                    logger.info(f"📦 SessionStorage恢复: {session_storage_restored}个项目")
+                except Exception as e:
+                    logger.warning(f"恢复sessionStorage失败: {e}")
+
+            # 刷新页面以应用所有状态
             self.driver.refresh()
             time.sleep(3)
 
-            logger.info(f"✅ {self.platform_name} 登录状态已从数据库恢复")
+            logger.info(f"✅ {self.platform_name} 完整登录状态已从数据库恢复")
+            logger.info(f"📊 恢复内容: Cookies={cookies_added}, LocalStorage={local_storage_restored}, SessionStorage={session_storage_restored}")
             return True
 
         except Exception as e:
@@ -665,9 +777,15 @@ class SeleniumPublisherBase(ABC):
                 logger.error(f"{self.platform_name} 驱动初始化失败")
                 return {'success': False, 'error': '驱动初始化失败'}
 
+            # 🔧 修复：在检查认证状态前先进行认证检查
             if not self.is_authenticated:
-                logger.error(f"{self.platform_name} 未认证，无法发布")
-                return {'success': False, 'error': '未认证'}
+                logger.info(f"🔐 检查 {self.platform_name} 登录状态...")
+                if await self._check_login_status():
+                    self.is_authenticated = True
+                    logger.info(f"✅ {self.platform_name} 登录状态验证成功")
+                else:
+                    logger.error(f"{self.platform_name} 未认证，无法发布")
+                    return {'success': False, 'error': '未认证'}
 
             logger.info(f"开始发布视频到 {self.platform_name}")
 

@@ -10,7 +10,7 @@ from src.utils.logger import logger
 try:
     from .selenium_douyin_publisher import SeleniumDouyinPublisher
     from .selenium_bilibili_publisher import SeleniumBilibiliPublisher
-    from .selenium_kuaishou_publisher import SeleniumKuaishouPublisher
+    from .fallback_chrome_kuaishou_publisher import FallbackChromeKuaishouPublisher
     from .selenium_xiaohongshu_publisher import SeleniumXiaohongshuPublisher
     from .selenium_wechat_publisher import SeleniumWechatPublisher
     from .selenium_youtube_publisher import SeleniumYoutubePublisher
@@ -20,7 +20,7 @@ except ImportError:
     SELENIUM_AVAILABLE = False
     SeleniumDouyinPublisher = None
     SeleniumBilibiliPublisher = None
-    SeleniumKuaishouPublisher = None
+    FallbackChromeKuaishouPublisher = None
     SeleniumXiaohongshuPublisher = None
     SeleniumWechatPublisher = None
     SeleniumYoutubePublisher = None
@@ -107,8 +107,8 @@ class PublisherFactory:
                 'tiktok': SeleniumDouyinPublisher,
                 'bilibili': SeleniumBilibiliPublisher,
                 'b站': SeleniumBilibiliPublisher,
-                'kuaishou': SeleniumKuaishouPublisher,
-                '快手': SeleniumKuaishouPublisher,
+                'kuaishou': FallbackChromeKuaishouPublisher,
+                '快手': FallbackChromeKuaishouPublisher,
                 'xiaohongshu': SeleniumXiaohongshuPublisher,
                 '小红书': SeleniumXiaohongshuPublisher,
                 'wechat': SeleniumWechatPublisher,

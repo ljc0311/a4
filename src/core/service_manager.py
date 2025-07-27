@@ -17,6 +17,8 @@ from .service_base import ServiceBase, ServiceResult
 from src.services.llm_service import LLMService
 from src.services.image_service import ImageService
 from src.services.voice_service import VoiceService
+from src.utils.memory_optimizer import memory_manager, monitor_memory
+from src.utils.async_task_manager import task_manager, create_task
 
 class ServiceType(Enum):
     """服务类型枚举"""
@@ -63,13 +65,28 @@ class ServiceManager:
         self.api_manager = APIManager(config_manager)
         self.services: Dict[ServiceType, ServiceBase] = {}
         self.workflows: Dict[str, List[WorkflowStep]] = {}
-        self.running_tasks: Dict[str, asyncio.Task] = {}
+        
+        # 使用新的任务管理器替代直接管理任务
+        self.task_manager = task_manager
 
         # 初始化服务
         self._initialize_services()
+        
+        # 注册内存清理回调
+        memory_manager.register_cleanup_callback(self._cleanup_services)
 
         ServiceManager._initialized = True
         logger.info("服务管理器初始化完成")
+    
+    def _cleanup_services(self):
+        """清理服务资源"""
+        try:
+            for service in self.services.values():
+                if hasattr(service, 'cleanup_resources'):
+                    service.cleanup_resources()
+            logger.info("服务资源清理完成")
+        except Exception as e:
+            logger.error(f"清理服务资源失败: {e}")
     
     async def initialize(self):
         """异步初始化方法"""
@@ -115,8 +132,9 @@ class ServiceManager:
         """获取指定类型的服务"""
         return self.services.get(service_type)
     
+    @monitor_memory("服务方法执行")
     async def execute_service_method(self, service_type: ServiceType, method: str, **kwargs) -> ServiceResult:
-        """执行服务方法"""
+        """执行服务方法 - 优化版本"""
         service = self.get_service(service_type)
         if not service:
             return ServiceResult(
@@ -132,10 +150,21 @@ class ServiceManager:
         
         try:
             method_func = getattr(service, method)
+            
+            # 创建任务名称
+            task_name = f"{service_type.value}.{method}"
+            
             if asyncio.iscoroutinefunction(method_func):
-                return await method_func(**kwargs)
+                # 对于异步方法，使用任务管理器
+                coro = method_func(**kwargs)
+                task_id = create_task(coro, name=task_name)
+                
+                # 等待任务完成
+                return await self.task_manager.wait_for_task(task_id)
             else:
+                # 对于同步方法，直接执行
                 return method_func(**kwargs)
+                
         except Exception as e:
             logger.error(f"执行服务方法失败: {service_type.value}.{method} - {e}")
             return ServiceResult(

@@ -188,14 +188,8 @@ class AudioDurationAnalyzer:
         image_requirements = {}
         
         for audio_index, duration in duration_map.items():
-            # 计算需要的图片数量
-            if duration <= 3.0:
-                image_count = 1
-            elif duration <= 6.0:
-                image_count = 2
-            else:
-                # 每3秒1张图，最少2张
-                image_count = max(2, int(duration / 3.0))
+            # 🔧 修改：每个配音段落只生成1张图片，确保配音数量与图片数量一致
+            image_count = 1
             
             # 计算每张图的时间覆盖
             time_per_image = duration / image_count

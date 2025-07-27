@@ -46,11 +46,9 @@ class VoiceFirstWorkflow:
         self.voice_segments: List[VoiceSegment] = []
         self.image_requirements: List[ImageRequirement] = []
         
-        # 配置参数
+        # 🔧 修改：配置参数，确保每个配音段落只生成1张图片
         self.config = {
-            'min_duration_for_single_image': 3.0,  # 3秒以内生成1张图
-            'max_duration_for_single_image': 6.0,  # 6秒以内生成2张图
-            'images_per_6_seconds': 2,  # 每6秒生成2张图
+            'images_per_segment': 1,  # 每个配音段落生成1张图片
             'min_image_duration': 1.5,  # 每张图最少覆盖1.5秒
             'max_image_duration': 4.0,  # 每张图最多覆盖4秒
         }
@@ -162,14 +160,8 @@ class VoiceFirstWorkflow:
             return []
     
     def _calculate_image_count(self, duration: float) -> int:
-        """根据时长计算图片数量"""
-        if duration <= self.config['min_duration_for_single_image']:
-            return 1
-        elif duration <= self.config['max_duration_for_single_image']:
-            return 2
-        else:
-            # 超过6秒，按比例计算
-            return max(2, int(duration / 3.0))  # 每3秒1张图，最少2张
+        """🔧 修改：每个配音段落只生成1张图片，确保配音数量与图片数量一致"""
+        return self.config['images_per_segment']
     
     def _generate_base_prompt(self, segment: VoiceSegment, img_index: int, total_images: int) -> str:
         """生成基础图像提示词"""

@@ -195,13 +195,8 @@ class SyncIssuesFixer:
             for i, analysis in duration_analysis.items():
                 duration = analysis['duration']
                 
-                # 根据时长计算图像数量
-                if duration <= 3.0:
-                    image_count = 1
-                elif duration <= 6.0:
-                    image_count = 2
-                else:
-                    image_count = max(2, int(duration / 3.0))
+                # 🔧 修改：每个配音段落只生成1张图片，确保配音数量与图片数量一致
+                image_count = 1
                 
                 # 生成图像需求
                 for img_idx in range(image_count):

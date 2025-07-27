@@ -3,11 +3,13 @@
 """
 图像生成处理器
 基于新的服务架构的图像生成和处理功能
+优化版本：支持内存管理、异步处理优化
 """
 
 import os
 import asyncio
 import base64
+import time
 from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +18,7 @@ from src.utils.logger import logger
 from src.core.service_manager import ServiceManager, ServiceType
 from src.core.service_base import ServiceResult
 from src.processors.text_processor import Shot, StoryboardResult
+from src.utils.memory_optimizer import memory_manager, monitor_memory
 
 @dataclass
 class ImageGenerationConfig:
@@ -54,16 +57,14 @@ class BatchImageResult:
     output_directory: str
     
 class ImageProcessor:
-    """图像生成处理器"""
+    """图像生成处理器 - 优化版本"""
     
     def __init__(self, service_manager: ServiceManager, output_dir: str = "output/images"):
         self.service_manager = service_manager
         self.output_dir = Path(output_dir)
-        # 不自动创建目录，假设目录已存在
         
         # 默认配置
         self.default_config = ImageGenerationConfig()
-        # 如果默认配置中的风格为None，从配置管理器获取
         if self.default_config.style is None:
             from src.utils.config_manager import ConfigManager
             config_manager = ConfigManager()
@@ -108,13 +109,35 @@ class ImageProcessor:
             }
         }
         
+        # 注册内存清理回调
+        memory_manager.register_cleanup_callback(self._cleanup_temp_files)
+        
         logger.info(f"图像处理器初始化完成，输出目录: {self.output_dir}")
     
+    def _cleanup_temp_files(self):
+        """清理临时文件"""
+        try:
+            if self.output_dir.exists():
+                # 清理超过1小时的临时文件
+                current_time = time.time()
+                for file_path in self.output_dir.rglob("*"):
+                    if file_path.is_file():
+                        file_age = current_time - file_path.stat().st_mtime
+                        if file_age > 3600:  # 1小时
+                            try:
+                                file_path.unlink()
+                                logger.debug(f"清理临时文件: {file_path}")
+                            except Exception as e:
+                                logger.error(f"清理临时文件失败 {file_path}: {e}")
+        except Exception as e:
+            logger.error(f"清理临时文件异常: {e}")
+    
+    @monitor_memory("分镜图像生成")
     async def generate_storyboard_images(self, storyboard: StoryboardResult, 
                                        config: ImageGenerationConfig = None,
                                        progress_callback: Callable = None,
                                        project_dir: str = None) -> BatchImageResult:
-        """为分镜生成图像"""
+        """为分镜生成图像 - 优化版本"""
         try:
             if config is None:
                 config = self.default_config
@@ -124,36 +147,61 @@ class ImageProcessor:
             
             logger.info(f"开始为 {len(storyboard.shots)} 个镜头生成图像")
             
-            results = []
+            # 检查内存状态
+            if memory_manager.check_memory_pressure():
+                logger.warning("内存压力过大，执行清理")
+                memory_manager.force_cleanup()
+            
             total_shots = len(storyboard.shots)
-            start_time = asyncio.get_event_loop().time()
+            start_time = time.time()
             
             # 创建项目输出目录
             if project_dir:
-                # 使用传入的项目目录下的images子文件夹
                 output_dir = Path(project_dir) / "images"
             else:
-                # 如果没有传入项目目录，使用默认的输出目录
                 output_dir = self.output_dir / f"storyboard_{int(start_time)}"
             output_dir.mkdir(parents=True, exist_ok=True)
             
-            for i, shot in enumerate(storyboard.shots):
-                try:
-                    if progress_callback:
-                        progress_callback(i / total_shots, f"生成第 {i+1}/{total_shots} 张图像...")
-                    
-                    result = await self._generate_single_image(shot, config, output_dir)
-                    if result:
-                        results.append(result)
-                    
-                    # 避免请求过于频繁
-                    await asyncio.sleep(0.5)
-                    
-                except Exception as e:
-                    logger.error(f"生成第 {shot.shot_id} 张图像失败: {e}")
-                    continue
+            # 准备批量生成的提示词
+            prompts = [shot.image_prompt for shot in storyboard.shots]
             
-            total_time = asyncio.get_event_loop().time() - start_time
+            # 使用优化的批量生成
+            image_service = self.service_manager.get_service(ServiceType.IMAGE)
+            if image_service and hasattr(image_service, 'generate_batch_images'):
+                service_results = await image_service.generate_batch_images(
+                    prompts=prompts,
+                    style=storyboard.style,
+                    negative_prompt=config.negative_prompt,
+                    provider=config.provider,
+                    progress_callback=progress_callback,
+                    width=config.width,
+                    height=config.height,
+                    steps=config.steps,
+                    cfg_scale=config.cfg_scale,
+                    seed=config.seed
+                )
+            else:
+                # 回退到逐个生成
+                service_results = await self._generate_images_sequentially(
+                    storyboard.shots, config, progress_callback
+                )
+            
+            # 处理结果并保存图像
+            results = []
+            for i, (shot, service_result) in enumerate(zip(storyboard.shots, service_results)):
+                if service_result.success:
+                    try:
+                        image_result = await self._save_image_result(
+                            shot, service_result, config, output_dir, start_time
+                        )
+                        if image_result:
+                            results.append(image_result)
+                    except Exception as e:
+                        logger.error(f"保存第 {shot.shot_id} 张图像失败: {e}")
+                else:
+                    logger.error(f"生成第 {shot.shot_id} 张图像失败: {service_result.error}")
+            
+            total_time = time.time() - start_time
             
             if progress_callback:
                 progress_callback(1.0, "图像生成完成")
@@ -172,6 +220,94 @@ class ImageProcessor:
         except Exception as e:
             logger.error(f"批量图像生成失败: {e}")
             raise
+    
+    async def _generate_images_sequentially(self, shots: List[Shot], config: ImageGenerationConfig, 
+                                          progress_callback: Callable = None) -> List[ServiceResult]:
+        """顺序生成图像（回退方案）"""
+        results = []
+        total_shots = len(shots)
+        
+        for i, shot in enumerate(shots):
+            try:
+                if progress_callback:
+                    progress_callback(i / total_shots, f"生成第 {i+1}/{total_shots} 张图像...")
+                
+                result = await self.service_manager.execute_service_method(
+                    ServiceType.IMAGE,
+                    "generate_image",
+                    prompt=shot.image_prompt,
+                    style=config.style,
+                    negative_prompt=config.negative_prompt,
+                    provider=config.provider,
+                    width=config.width,
+                    height=config.height,
+                    steps=config.steps,
+                    cfg_scale=config.cfg_scale,
+                    seed=config.seed
+                )
+                
+                results.append(result)
+                
+                # 避免请求过于频繁
+                await asyncio.sleep(0.3)
+                
+            except Exception as e:
+                logger.error(f"生成第 {shot.shot_id} 张图像失败: {e}")
+                results.append(ServiceResult(success=False, error=str(e)))
+        
+        return results
+    
+    async def _save_image_result(self, shot: Shot, service_result: ServiceResult, 
+                               config: ImageGenerationConfig, output_dir: Path, 
+                               start_time: float) -> Optional[ImageResult]:
+        """保存图像结果"""
+        try:
+            image_filename = f"shot_{shot.shot_id:03d}.png"
+            image_path = output_dir / image_filename
+            
+            if 'image_data' in service_result.data:
+                # Base64编码的图像数据
+                if isinstance(service_result.data['image_data'], str):
+                    image_data = base64.b64decode(service_result.data['image_data'])
+                else:
+                    image_data = service_result.data['image_data']
+                
+                with open(image_path, 'wb') as f:
+                    f.write(image_data)
+                    
+            elif 'image_path' in service_result.data:
+                # 图像文件路径
+                import shutil
+                shutil.copy2(service_result.data['image_path'], image_path)
+            else:
+                logger.error("图像生成结果中没有图像数据")
+                return None
+            
+            generation_time = time.time() - start_time
+            
+            return ImageResult(
+                shot_id=shot.shot_id,
+                image_path=str(image_path),
+                prompt=shot.image_prompt,
+                provider=config.provider,
+                generation_time=generation_time,
+                metadata={
+                    "scene": shot.scene,
+                    "characters": shot.characters,
+                    "action": shot.action,
+                    "config": {
+                        "width": config.width,
+                        "height": config.height,
+                        "steps": config.steps,
+                        "cfg_scale": config.cfg_scale,
+                        "seed": config.seed
+                    }
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"保存图像结果失败: {e}")
+            return None
     
     async def _generate_single_image(self, shot: Shot, config: ImageGenerationConfig, 
                                    output_dir: Path) -> Optional[ImageResult]:

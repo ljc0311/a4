@@ -28,6 +28,9 @@ from src.core.service_manager import ServiceManager, ServiceType
 from src.utils.async_runner import async_runner
 from src.utils.ui_utils import show_success
 
+# 导入内存管理器
+from src.utils.memory_optimizer import memory_manager
+
 # 导入现有的功能标签页
 from .five_stage_storyboard_tab import FiveStageStoryboardTab
 from .voice_generation_tab import VoiceGenerationTab
@@ -253,10 +256,64 @@ class ModernCardMainWindow(QMainWindow):
         self.setup_ui()
         self.setup_connections()
         
+        # 设置内存监控
+        self.setup_memory_monitoring()
+        
         # 默认选中第一个页面
         self.switch_to_page("workflow")
         
         logger.info("现代化卡片式主窗口初始化完成")
+    
+    def setup_memory_monitoring(self):
+        """设置内存监控"""
+        try:
+            # 注册窗口清理回调
+            memory_manager.register_cleanup_callback(self.cleanup_ui_resources)
+            
+            # 创建内存状态更新定时器
+            self.memory_timer = QTimer()
+            self.memory_timer.timeout.connect(self.update_memory_status)
+            self.memory_timer.start(30000)  # 每30秒更新一次内存状态
+            
+            logger.info("内存监控设置完成")
+            
+        except Exception as e:
+            logger.error(f"设置内存监控失败: {e}")
+    
+    def cleanup_ui_resources(self):
+        """清理UI资源"""
+        try:
+            # 清理页面缓存
+            for page_name, page in self.pages.items():
+                if hasattr(page, 'cleanup_resources'):
+                    page.cleanup_resources()
+            
+            # 清理图像缓存
+            if hasattr(self, 'image_cache'):
+                self.image_cache.clear()
+            
+            logger.info("UI资源清理完成")
+            
+        except Exception as e:
+            logger.error(f"清理UI资源失败: {e}")
+    
+    def update_memory_status(self):
+        """更新内存状态显示"""
+        try:
+            stats = memory_manager.get_memory_stats()
+            
+            # 如果内存使用过高，显示警告
+            if stats.rss_mb > 1500:  # 1.5GB
+                self.statusBar().showMessage(
+                    f"⚠️ 内存使用较高: {stats.rss_mb:.0f}MB", 5000
+                )
+            elif stats.rss_mb > 1000:  # 1GB
+                self.statusBar().showMessage(
+                    f"💾 内存使用: {stats.rss_mb:.0f}MB", 3000
+                )
+                
+        except Exception as e:
+            logger.error(f"更新内存状态失败: {e}")
     
     def setup_window(self):
         """设置窗口属性"""

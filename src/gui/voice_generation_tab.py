@@ -3533,13 +3533,8 @@ class VoiceGenerationTab(QWidget):
             return 3.0  # 默认3秒
 
     def _calculate_image_count_by_duration(self, duration: float) -> int:
-        """🔧 新增：基于音频时长计算建议的图像数量"""
-        if duration < 3:
-            return 1  # 短配音生成1张图像
-        elif duration < 6:
-            return 2  # 中等配音生成2张图像
-        else:
-            return min(3, max(2, int(duration / 2)))  # 长配音生成2-3张图像
+        """🔧 修改：每个配音段落只生成1张图片，确保配音数量与图片数量一致"""
+        return 1
 
     def _save_voice_data_for_image_generation(self, voice_data: list):
         """🔧 新增：保存配音数据到项目，供图像生成使用"""

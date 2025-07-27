@@ -317,10 +317,5 @@ class VoiceImageMatcher:
             return []
     
     def _calculate_image_count(self, duration: float) -> int:
-        """根据时长计算图像数量"""
-        if duration <= 3.0:
-            return 1
-        elif duration <= 6.0:
-            return 2
-        else:
-            return max(2, int(duration / 3.0))
+        """🔧 修改：每个配音段落只生成1张图片，确保配音数量与图片数量一致"""
+        return 1

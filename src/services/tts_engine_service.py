@@ -95,40 +95,27 @@ class EdgeTTSEngine(TTSEngineBase):
             pitch_str = f"{int(pitch):+d}Hz"
 
             # 确保输出目录存在
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            output_dir = os.path.dirname(output_path)
+            if output_dir:  # 只有当目录不为空时才创建
+                os.makedirs(output_dir, exist_ok=True)
 
-            # 生成语音
+            # 🔧 修复：简化Edge-TTS调用，避免SubMaker兼容性问题
             communicate = edge_tts.Communicate(text, voice, rate=rate_str, pitch=pitch_str)
-            sub_maker = edge_tts.SubMaker()
-
+            
+            # 只生成音频，暂时跳过字幕生成以避免兼容性问题
             with open(output_path, "wb") as file:
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio" and "data" in chunk:
                         file.write(chunk["data"])
-                    elif chunk["type"] == "WordBoundary":
-                        sub_maker.feed(chunk)
-
-            # Edge-TTS 7.0+ 需要调用merge_cues()来完成字幕生成
-            # merge_cues()参数指定要合并的单词数量，1表示不合并
-            if hasattr(sub_maker, 'merge_cues'):
-                sub_maker.merge_cues(1)
-
-            # 生成字幕数据
-            subtitle_data = []
-            if hasattr(sub_maker, 'cues') and len(sub_maker.cues) > 0:
-                for cue in sub_maker.cues:
-                    # Edge-TTS 7.x版本使用content属性
-                    cue_text = getattr(cue, 'content', '') or getattr(cue, 'text', '') or str(cue)
-                    subtitle_data.append({
-                        'start': cue.start,
-                        'end': cue.end,
-                        'text': cue_text
-                    })
+            
+            # 检查文件是否成功生成
+            if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                raise Exception("音频文件生成失败或为空")
             
             return {
                 'success': True,
                 'audio_file': output_path,
-                'subtitle_data': subtitle_data,
+                'subtitle_data': [],  # 暂时返回空字幕数据
                 'engine': 'edge_tts',
                 'voice': voice
             }

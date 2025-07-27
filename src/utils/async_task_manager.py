@@ -2,19 +2,20 @@
 # -*- coding: utf-8 -*-
 """
 异步任务管理器
-提供高效的异步任务调度和管理功能
+优化异步任务的执行、监控和资源管理
 """
 
 import asyncio
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Callable, Optional
+import weakref
+from typing import Dict, List, Optional, Any, Callable, Coroutine
 from dataclasses import dataclass
 from enum import Enum
-from PyQt5.QtCore import QObject, pyqtSignal, QThread
-from src.utils.logger import logger
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
+from src.utils.logger import logger
+from src.utils.memory_optimizer import memory_manager
 
 class TaskStatus(Enum):
     """任务状态枚举"""
@@ -24,183 +25,325 @@ class TaskStatus(Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
-
 @dataclass
-class TaskResult:
-    """任务结果数据类"""
+class TaskInfo:
+    """任务信息"""
     task_id: str
+    name: str
     status: TaskStatus
+    created_at: float
+    started_at: Optional[float] = None
+    completed_at: Optional[float] = None
     result: Any = None
-    error: Optional[Exception] = None
-    start_time: Optional[float] = None
-    end_time: Optional[float] = None
+    error: Optional[str] = None
+    progress: float = 0.0
+    metadata: Dict[str, Any] = None
     
-    @property
-    def duration(self) -> Optional[float]:
-        """获取任务执行时长"""
-        if self.start_time and self.end_time:
-            return self.end_time - self.start_time
-        return None
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
-
-class AsyncTaskManager(QObject):
+class AsyncTaskManager:
     """异步任务管理器"""
     
-    task_started = pyqtSignal(str)  # task_id
-    task_completed = pyqtSignal(str, object)  # task_id, result
-    task_failed = pyqtSignal(str, Exception)  # task_id, error
-    task_progress = pyqtSignal(str, int)  # task_id, progress_percent
-    all_tasks_completed = pyqtSignal()
+    _instance = None
+    _lock = threading.Lock()
     
-    def __init__(self, max_workers: int = 4):
-        super().__init__()
-        self.max_workers = max_workers
-        self.executor = ThreadPoolExecutor(max_workers=max_workers)
-        self.tasks: Dict[str, TaskResult] = {}
-        self.running_tasks: Dict[str, threading.Thread] = {}
-        self._task_counter = 0
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self):
+        if hasattr(self, '_initialized'):
+            return
         
-    def submit_task(self, func: Callable, *args, task_id: str = None, **kwargs) -> str:
-        """提交任务"""
-        if task_id is None:
-            self._task_counter += 1
-            task_id = f"task_{self._task_counter}"
-            
-        # 创建任务结果对象
-        task_result = TaskResult(task_id=task_id, status=TaskStatus.PENDING)
-        self.tasks[task_id] = task_result
+        self._initialized = True
+        self.tasks: Dict[str, TaskInfo] = {}
+        self.running_tasks: Dict[str, asyncio.Task] = {}
+        self.task_callbacks: Dict[str, List[Callable]] = {}
         
-        # 提交任务到线程池
-        future = self.executor.submit(self._execute_task, task_id, func, *args, **kwargs)
+        # 任务限制
+        self.max_concurrent_tasks = 10
+        self.max_task_history = 100
         
-        logger.info(f"任务已提交: {task_id}")
+        # 线程池用于CPU密集型任务
+        self.thread_pool = ThreadPoolExecutor(
+            max_workers=4, 
+            thread_name_prefix="AsyncTaskManager"
+        )
+        
+        # 任务清理定时器
+        self.cleanup_interval = 300  # 5分钟
+        self.last_cleanup = time.time()
+        
+        # 注册内存清理回调
+        memory_manager.register_cleanup_callback(self.cleanup_completed_tasks)
+        
+        logger.info("异步任务管理器初始化完成")
+    
+    def create_task(self, coro: Coroutine, name: str = None, 
+                   callback: Callable = None, metadata: Dict = None) -> str:
+        """创建异步任务"""
+        task_id = f"task_{int(time.time() * 1000)}_{id(coro)}"
+        
+        if name is None:
+            name = f"Task_{len(self.tasks) + 1}"
+        
+        # 检查并发任务数量
+        running_count = len([t for t in self.tasks.values() if t.status == TaskStatus.RUNNING])
+        if running_count >= self.max_concurrent_tasks:
+            logger.warning(f"并发任务数量达到限制({self.max_concurrent_tasks})，任务将排队等待")
+        
+        # 创建任务信息
+        task_info = TaskInfo(
+            task_id=task_id,
+            name=name,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+            metadata=metadata or {}
+        )
+        
+        self.tasks[task_id] = task_info
+        
+        # 注册回调
+        if callback:
+            self.register_callback(task_id, callback)
+        
+        # 创建并启动asyncio任务
+        task = asyncio.create_task(self._run_task(task_id, coro))
+        self.running_tasks[task_id] = task
+        
+        logger.info(f"创建任务: {name} (ID: {task_id})")
         return task_id
-        
-    def _execute_task(self, task_id: str, func: Callable, *args, **kwargs):
-        """执行任务"""
-        task_result = self.tasks[task_id]
+    
+    async def _run_task(self, task_id: str, coro: Coroutine):
+        """运行任务的包装器"""
+        task_info = self.tasks.get(task_id)
+        if not task_info:
+            logger.error(f"任务信息不存在: {task_id}")
+            return
         
         try:
             # 更新任务状态
-            task_result.status = TaskStatus.RUNNING
-            task_result.start_time = time.time()
-            self.task_started.emit(task_id)
+            task_info.status = TaskStatus.RUNNING
+            task_info.started_at = time.time()
+            
+            logger.info(f"开始执行任务: {task_info.name}")
             
             # 执行任务
-            result = func(*args, **kwargs)
+            result = await coro
             
             # 任务完成
-            task_result.status = TaskStatus.COMPLETED
-            task_result.result = result
-            task_result.end_time = time.time()
+            task_info.status = TaskStatus.COMPLETED
+            task_info.completed_at = time.time()
+            task_info.result = result
+            task_info.progress = 1.0
             
-            self.task_completed.emit(task_id, result)
-            logger.info(f"任务完成: {task_id}, 耗时: {task_result.duration:.2f}s")
+            duration = task_info.completed_at - task_info.started_at
+            logger.info(f"任务完成: {task_info.name}, 耗时: {duration:.2f}s")
+            
+            # 执行回调
+            await self._execute_callbacks(task_id, result, None)
+            
+        except asyncio.CancelledError:
+            task_info.status = TaskStatus.CANCELLED
+            task_info.completed_at = time.time()
+            logger.info(f"任务被取消: {task_info.name}")
             
         except Exception as e:
-            # 任务失败
-            task_result.status = TaskStatus.FAILED
-            task_result.error = e
-            task_result.end_time = time.time()
+            task_info.status = TaskStatus.FAILED
+            task_info.completed_at = time.time()
+            task_info.error = str(e)
             
-            self.task_failed.emit(task_id, e)
-            logger.error(f"任务失败: {task_id}, 错误: {e}")
+            logger.error(f"任务执行失败: {task_info.name}, 错误: {e}")
+            
+            # 执行回调
+            await self._execute_callbacks(task_id, None, e)
             
         finally:
-            # 检查是否所有任务都完成
-            self._check_all_tasks_completed()
+            # 清理运行中的任务引用
+            if task_id in self.running_tasks:
+                del self.running_tasks[task_id]
             
-    def _check_all_tasks_completed(self):
-        """检查是否所有任务都已完成"""
-        pending_tasks = [t for t in self.tasks.values() 
-                        if t.status in [TaskStatus.PENDING, TaskStatus.RUNNING]]
+            # 定期清理
+            await self._periodic_cleanup()
+    
+    async def _execute_callbacks(self, task_id: str, result: Any, error: Exception):
+        """执行任务回调"""
+        callbacks = self.task_callbacks.get(task_id, [])
         
-        if not pending_tasks:
-            self.all_tasks_completed.emit()
-            
+        for callback in callbacks:
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(task_id, result, error)
+                else:
+                    callback(task_id, result, error)
+            except Exception as e:
+                logger.error(f"执行任务回调失败: {e}")
+        
+        # 清理回调
+        if task_id in self.task_callbacks:
+            del self.task_callbacks[task_id]
+    
+    def register_callback(self, task_id: str, callback: Callable):
+        """注册任务回调"""
+        if task_id not in self.task_callbacks:
+            self.task_callbacks[task_id] = []
+        
+        self.task_callbacks[task_id].append(callback)
+    
     def cancel_task(self, task_id: str) -> bool:
         """取消任务"""
-        if task_id in self.tasks:
-            task_result = self.tasks[task_id]
-            if task_result.status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
-                task_result.status = TaskStatus.CANCELLED
-                logger.info(f"任务已取消: {task_id}")
-                return True
+        if task_id in self.running_tasks:
+            task = self.running_tasks[task_id]
+            task.cancel()
+            logger.info(f"取消任务: {task_id}")
+            return True
+        
         return False
-        
-    def get_task_status(self, task_id: str) -> Optional[TaskStatus]:
-        """获取任务状态"""
-        if task_id in self.tasks:
-            return self.tasks[task_id].status
-        return None
-        
-    def get_task_result(self, task_id: str) -> Optional[TaskResult]:
-        """获取任务结果"""
-        return self.tasks.get(task_id)
-        
-    def get_all_tasks(self) -> Dict[str, TaskResult]:
-        """获取所有任务"""
-        return self.tasks.copy()
-        
-    def clear_completed_tasks(self):
-        """清理已完成的任务"""
-        completed_tasks = [task_id for task_id, task in self.tasks.items()
-                          if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]]
-        
-        for task_id in completed_tasks:
-            del self.tasks[task_id]
-            
-        logger.info(f"已清理 {len(completed_tasks)} 个已完成任务")
-        
-    def shutdown(self, wait: bool = True):
-        """关闭任务管理器"""
-        logger.info("正在关闭异步任务管理器...")
-        self.executor.shutdown(wait=wait)
-
-
-class BatchTaskProcessor:
-    """批量任务处理器"""
     
-    def __init__(self, task_manager: AsyncTaskManager):
-        self.task_manager = task_manager
+    def get_task_info(self, task_id: str) -> Optional[TaskInfo]:
+        """获取任务信息"""
+        return self.tasks.get(task_id)
+    
+    def get_running_tasks(self) -> List[TaskInfo]:
+        """获取正在运行的任务"""
+        return [info for info in self.tasks.values() if info.status == TaskStatus.RUNNING]
+    
+    def get_task_stats(self) -> Dict[str, Any]:
+        """获取任务统计信息"""
+        total_tasks = len(self.tasks)
+        running_tasks = len([t for t in self.tasks.values() if t.status == TaskStatus.RUNNING])
+        completed_tasks = len([t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED])
+        failed_tasks = len([t for t in self.tasks.values() if t.status == TaskStatus.FAILED])
         
-    def process_batch(self, tasks: List[Dict[str, Any]], 
-                     progress_callback: Optional[Callable] = None) -> List[TaskResult]:
-        """批量处理任务"""
-        task_ids = []
+        return {
+            'total_tasks': total_tasks,
+            'running_tasks': running_tasks,
+            'completed_tasks': completed_tasks,
+            'failed_tasks': failed_tasks,
+            'success_rate': completed_tasks / total_tasks if total_tasks > 0 else 0
+        }
+    
+    def update_task_progress(self, task_id: str, progress: float, message: str = None):
+        """更新任务进度"""
+        task_info = self.tasks.get(task_id)
+        if task_info:
+            task_info.progress = max(0.0, min(1.0, progress))
+            if message:
+                task_info.metadata['progress_message'] = message
+    
+    async def run_in_thread(self, func: Callable, *args, **kwargs) -> Any:
+        """在线程池中运行CPU密集型任务"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.thread_pool, func, *args, **kwargs)
+    
+    def cleanup_completed_tasks(self):
+        """清理已完成的任务"""
+        current_time = time.time()
         
-        # 提交所有任务
-        for i, task_info in enumerate(tasks):
-            func = task_info['func']
-            args = task_info.get('args', ())
-            kwargs = task_info.get('kwargs', {})
-            task_id = task_info.get('task_id', f"batch_task_{i}")
-            
-            submitted_task_id = self.task_manager.submit_task(func, *args, task_id=task_id, **kwargs)
-            task_ids.append(submitted_task_id)
-            
-        # 等待所有任务完成
-        results = []
-        completed_count = 0
+        # 保留最近的任务和正在运行的任务
+        tasks_to_keep = {}
+        running_tasks = []
+        completed_tasks = []
         
-        while completed_count < len(task_ids):
-            time.sleep(0.1)  # 短暂等待
+        for task_id, task_info in self.tasks.items():
+            if task_info.status == TaskStatus.RUNNING:
+                running_tasks.append((task_id, task_info))
+            elif task_info.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
+                completed_tasks.append((task_id, task_info))
+        
+        # 保留所有运行中的任务
+        for task_id, task_info in running_tasks:
+            tasks_to_keep[task_id] = task_info
+        
+        # 按完成时间排序，保留最近的任务
+        completed_tasks.sort(key=lambda x: x[1].completed_at or 0, reverse=True)
+        
+        keep_count = min(len(completed_tasks), self.max_task_history - len(running_tasks))
+        for task_id, task_info in completed_tasks[:keep_count]:
+            tasks_to_keep[task_id] = task_info
+        
+        # 更新任务字典
+        removed_count = len(self.tasks) - len(tasks_to_keep)
+        self.tasks = tasks_to_keep
+        
+        if removed_count > 0:
+            logger.info(f"清理了 {removed_count} 个已完成的任务")
+    
+    async def _periodic_cleanup(self):
+        """定期清理"""
+        current_time = time.time()
+        if current_time - self.last_cleanup > self.cleanup_interval:
+            self.cleanup_completed_tasks()
+            self.last_cleanup = current_time
+    
+    async def wait_for_task(self, task_id: str, timeout: float = None) -> Any:
+        """等待任务完成"""
+        if task_id not in self.running_tasks:
+            task_info = self.tasks.get(task_id)
+            if task_info:
+                if task_info.status == TaskStatus.COMPLETED:
+                    return task_info.result
+                elif task_info.status == TaskStatus.FAILED:
+                    raise Exception(task_info.error)
+            raise ValueError(f"任务不存在: {task_id}")
+        
+        task = self.running_tasks[task_id]
+        
+        try:
+            if timeout:
+                result = await asyncio.wait_for(task, timeout=timeout)
+            else:
+                result = await task
             
-            for task_id in task_ids:
-                task_result = self.task_manager.get_task_result(task_id)
-                if task_result and task_result.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
-                    if task_result not in results:
-                        results.append(task_result)
-                        completed_count += 1
-                        
-                        # 调用进度回调
-                        if progress_callback:
-                            progress = int((completed_count / len(task_ids)) * 100)
-                            progress_callback(progress)
-                            
-        return results
+            # 从任务信息中获取结果
+            task_info = self.tasks.get(task_id)
+            if task_info and task_info.result is not None:
+                return task_info.result
+            
+            return result
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"等待任务超时: {task_id}")
+            raise
+    
+    def shutdown(self):
+        """关闭任务管理器"""
+        logger.info("关闭异步任务管理器...")
+        
+        # 取消所有运行中的任务
+        for task_id, task in self.running_tasks.items():
+            if not task.done():
+                task.cancel()
+        
+        # 关闭线程池
+        try:
+            self.thread_pool.shutdown(wait=False)  # 不等待，避免阻塞
+        except Exception as e:
+            logger.error(f"关闭线程池失败: {e}")
+        
+        logger.info("异步任务管理器已关闭")
 
+# 全局实例
+task_manager = AsyncTaskManager()
 
-# 全局任务管理器实例
-global_task_manager = AsyncTaskManager(max_workers=4)
-batch_processor = BatchTaskProcessor(global_task_manager)
+def create_task(coro: Coroutine, name: str = None, callback: Callable = None, 
+               metadata: Dict = None) -> str:
+    """创建异步任务的便捷函数"""
+    return task_manager.create_task(coro, name, callback, metadata)
+
+def cancel_task(task_id: str) -> bool:
+    """取消任务的便捷函数"""
+    return task_manager.cancel_task(task_id)
+
+def get_task_info(task_id: str) -> Optional[TaskInfo]:
+    """获取任务信息的便捷函数"""
+    return task_manager.get_task_info(task_id)
+
+async def wait_for_task(task_id: str, timeout: float = None) -> Any:
+    """等待任务完成的便捷函数"""
+    return await task_manager.wait_for_task(task_id, timeout)

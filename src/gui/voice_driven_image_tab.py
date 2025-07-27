@@ -461,13 +461,8 @@ class VoiceDrivenImageTab(QWidget):
             return 3.0
 
     def _calculate_image_count(self, duration: float) -> int:
-        """🔧 新增：基于时长计算图像数量"""
-        if duration < 3:
-            return 1
-        elif duration < 6:
-            return 2
-        else:
-            return min(3, max(2, int(duration / 2)))
+        """🔧 修改：每个配音段落只生成1张图片，确保配音数量与图片数量一致"""
+        return 1
 
     def _auto_generate_all_prompts(self):
         """🔧 新增：自动为所有段落生成图像提示词"""

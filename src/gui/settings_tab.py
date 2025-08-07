@@ -12,6 +12,7 @@ from src.utils.logger import logger
 from src.utils.config_manager import ConfigManager
 from src.gui.log_dialog import LogDialog
 from src.gui.model_manager_dialog import ModelManagerDialog
+from src.gui.model_settings_panel import ModelSettingsPanel
 
 
 class SettingsTab(QWidget):
@@ -56,6 +57,10 @@ class SettingsTab(QWidget):
         # 显示设置标签页
         self.display_settings_tab = self.create_display_settings_tab()
         self.tab_widget.addTab(self.display_settings_tab, "🖥️ 显示设置")
+
+        # 模型设置标签页
+        self.model_settings_tab = self.create_model_settings_tab()
+        self.tab_widget.addTab(self.model_settings_tab, "🤖 模型设置")
 
         main_layout.addWidget(self.tab_widget)
         self.setLayout(main_layout)
@@ -239,6 +244,16 @@ class SettingsTab(QWidget):
     def get_comfyui_output_dir(self):
         """获取ComfyUI输出目录"""
         return self.comfyui_output_dir
+
+    def create_model_settings_tab(self):
+        """创建模型设置标签页"""
+        # 创建模型设置面板
+        model_settings_panel = ModelSettingsPanel(self)
+        
+        # 连接模型更新信号
+        model_settings_panel.models_updated.connect(self.refresh_models_display)
+        
+        return model_settings_panel
 
     def create_display_settings_tab(self):
         """创建显示设置标签页"""

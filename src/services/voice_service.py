@@ -89,15 +89,22 @@ class VoiceService(ServiceBase):
         if not text:
             return ServiceResult(success=False, error="文本不能为空")
         
+        # 从kwargs中移除text和voice，避免参数冲突
+        clean_kwargs = {k: v for k, v in kwargs.items() if k not in ['text', 'voice']}
+        
         # 根据不同提供商调用TTS API
         if api_config.provider.lower() == 'azure':
-            response = await self._call_azure_tts(api_config, text, voice, **kwargs)
+            # 检查是否是Edge-TTS（免费版本）
+            if api_config.model_name == 'edge-tts':
+                response = await self._call_edge_tts(api_config, text, voice, **clean_kwargs)
+            else:
+                response = await self._call_azure_tts(api_config, text, voice, **clean_kwargs)
         elif api_config.provider.lower() == 'elevenlabs':
-            response = await self._call_elevenlabs_tts(api_config, text, voice, **kwargs)
+            response = await self._call_elevenlabs_tts(api_config, text, voice, **clean_kwargs)
         elif api_config.provider.lower() == 'openai':
-            response = await self._call_openai_tts(api_config, text, voice, **kwargs)
+            response = await self._call_openai_tts(api_config, text, voice, **clean_kwargs)
         elif api_config.provider.lower() == 'local':
-            response = await self._call_local_tts(api_config, text, voice, **kwargs)
+            response = await self._call_local_tts(api_config, text, voice, **clean_kwargs)
         else:
             return ServiceResult(success=False, error=f"不支持的TTS提供商: {api_config.provider}")
         
@@ -177,6 +184,60 @@ class VoiceService(ServiceBase):
                 else:
                     error_text = await response.text()
                     raise Exception(f"Azure TTS请求失败 (状态码: {response.status}): {error_text}")
+    
+    async def _call_edge_tts(self, api_config: APIConfig, text: str, voice: str, **kwargs) -> Dict:
+        """调用Edge-TTS API（免费版本）"""
+        try:
+            import edge_tts
+            import tempfile
+            import os
+            import base64
+            
+            # 获取语音参数
+            rate = kwargs.get('speed', 1.0)
+            volume = kwargs.get('volume', 1.0)
+            pitch = kwargs.get('pitch', 0)
+            
+            # 构建SSML格式的语音参数
+            rate_str = f"{int((rate - 1) * 100):+d}%"
+            volume_str = f"{int((volume - 1) * 100):+d}%"
+            pitch_str = f"{int(pitch):+d}Hz"
+            
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                temp_path = temp_file.name
+            
+            try:
+                # 创建Edge-TTS通信对象，使用voice作为音色ID
+                communicate = edge_tts.Communicate(text, voice)
+                
+                # 生成语音并保存到临时文件
+                await communicate.save(temp_path)
+                
+                # 读取生成的音频文件
+                with open(temp_path, 'rb') as audio_file:
+                    audio_data = audio_file.read()
+                
+                # 转换为base64
+                audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+                
+                return {
+                    'audio_data': audio_base64,
+                    'format': 'mp3',
+                    'voice': voice,
+                    'text_length': len(text),
+                    'audio_size': len(audio_data)
+                }
+                
+            finally:
+                # 清理临时文件
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                    
+        except ImportError:
+            raise Exception("Edge-TTS库未安装，请运行: pip install edge-tts")
+        except Exception as e:
+            raise Exception(f"Edge-TTS生成失败: {str(e)}")
     
     async def _call_elevenlabs_tts(self, api_config: APIConfig, text: str, voice: str, **kwargs) -> Dict:
         """调用ElevenLabs TTS API"""
@@ -392,8 +453,7 @@ class VoiceService(ServiceBase):
             logger.error(f"语音转文字失败: {e}")
             return ServiceResult(
                 success=False,
-                error=str(e),
-                message="语音转文字失败"
+                error=str(e)
             )
     
     async def batch_text_to_speech(self, texts: List[str], voice: str = "中文女声", 

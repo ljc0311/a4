@@ -3538,8 +3538,8 @@ class VideoGenerationTab(QWidget):
 
                 logger.info(f"视频生成成功: {scene_id} -> {os.path.basename(video_path)}")
 
-                # 标记为完成
-                worker_info['completed'] = True
+                # 🔧 修复：从活跃任务中移除已完成的任务，释放并发槽位
+                del self.active_workers[scene_id]
 
             else:
                 # 检查是否需要降级处理

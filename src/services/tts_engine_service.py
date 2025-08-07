@@ -89,6 +89,13 @@ class EdgeTTSEngine(TTSEngineBase):
             voice = kwargs.get('voice', 'zh-CN-YunxiNeural')
             speed = kwargs.get('speed', 1.0)
             pitch = kwargs.get('pitch', 0)
+            
+            # 🔧 添加调试日志
+            logger.info(f"🔧 [EdgeTTS] 开始生成语音")
+            logger.info(f"🔧 [EdgeTTS] 文本: {text[:100]}...")
+            logger.info(f"🔧 [EdgeTTS] 音色: {voice}")
+            logger.info(f"🔧 [EdgeTTS] 参数: speed={speed}, pitch={pitch}")
+            logger.info(f"🔧 [EdgeTTS] 输出路径: {output_path}")
 
             # 转换参数格式
             rate_str = f"{int((speed - 1) * 100):+d}%"
@@ -133,16 +140,35 @@ class EdgeTTSEngine(TTSEngineBase):
             try:
                 # 这里可以从配置文件或API获取音色列表
                 self.voices_cache = [
-                    {'id': 'zh-CN-YunxiNeural', 'name': '云希-男声', 'language': 'zh-CN'},
-                    {'id': 'zh-CN-XiaoxiaoNeural', 'name': '晓晓-女声', 'language': 'zh-CN'},
-                    {'id': 'zh-CN-YunyangNeural', 'name': '云扬-男声', 'language': 'zh-CN'},
-                    {'id': 'zh-CN-XiaoyiNeural', 'name': '晓伊-女声', 'language': 'zh-CN'},
-                    {'id': 'en-US-AriaNeural', 'name': 'Aria-Female', 'language': 'en-US'},
-                    {'id': 'en-US-GuyNeural', 'name': 'Guy-Male', 'language': 'en-US'},
+                    {'id': 'zh-CN-XiaoxiaoNeural', 'name': 'Xiaoxiao', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-XiaoyiNeural', 'name': 'Xiaoyi', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunjianNeural', 'name': 'Yunjian', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunxiNeural', 'name': 'Yunxi', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunxiaNeural', 'name': 'Yunxia', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunyangNeural', 'name': 'Yunyang', 'language': 'zh-CN'},
+                    {'id': 'en-US-AvaNeural', 'name': 'Ava', 'language': 'en-US'},
+                    {'id': 'en-US-AndrewNeural', 'name': 'Andrew', 'language': 'en-US'},
+                    {'id': 'en-US-EmmaNeural', 'name': 'Emma', 'language': 'en-US'},
+                    {'id': 'en-US-BrianNeural', 'name': 'Brian', 'language': 'en-US'},
+                    {'id': 'en-US-AnaNeural', 'name': 'Ana', 'language': 'en-US'},
+                    {'id': 'en-US-AndrewMultilingualNeural', 'name': 'AndrewMultilingual', 'language': 'en-US'},
                 ]
             except Exception as e:
                 logger.error(f"获取Edge-TTS音色列表失败: {e}")
-                self.voices_cache = []
+                self.voices_cache = [
+                    {'id': 'zh-CN-XiaoxiaoNeural', 'name': 'Xiaoxiao', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-XiaoyiNeural', 'name': 'Xiaoyi', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunjianNeural', 'name': 'Yunjian', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunxiNeural', 'name': 'Yunxi', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunxiaNeural', 'name': 'Yunxia', 'language': 'zh-CN'},
+                    {'id': 'zh-CN-YunyangNeural', 'name': 'Yunyang', 'language': 'zh-CN'},
+                    {'id': 'en-US-AvaNeural', 'name': 'Ava', 'language': 'en-US'},
+                    {'id': 'en-US-AndrewNeural', 'name': 'Andrew', 'language': 'en-US'},
+                    {'id': 'en-US-EmmaNeural', 'name': 'Emma', 'language': 'en-US'},
+                    {'id': 'en-US-BrianNeural', 'name': 'Brian', 'language': 'en-US'},
+                    {'id': 'en-US-AnaNeural', 'name': 'Ana', 'language': 'en-US'},
+                    {'id': 'en-US-AndrewMultilingualNeural', 'name': 'AndrewMultilingual', 'language': 'en-US'},
+                ]
         
         return self.voices_cache
     

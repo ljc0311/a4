@@ -54,7 +54,7 @@ class SeleniumPublisherFactory:
                     'timeout': 30,
                     'implicit_wait': 10,
                     'headless': False,
-                    'simulation_mode': False,
+                    'simulation_mode': False,  # 真实发布模式
                     'user_friendly': True
                 }
             elif platform in ['kuaishou_simple', 'kuaishou_fallback']:
@@ -64,7 +64,7 @@ class SeleniumPublisherFactory:
                     'timeout': 30,
                     'implicit_wait': 10,
                     'headless': False,
-                    'simulation_mode': False,  # 实际发布时设为False
+                    'simulation_mode': False,  # 真实发布模式
                     'use_stealth': True,       # 启用selenium-stealth反检测
                     'disable_images': False,   # 可选：禁用图片加载提高速度
                     'user_friendly': True
@@ -78,14 +78,13 @@ class SeleniumPublisherFactory:
                         'init_timeout': 60            # 初始化超时时间
                     })
             else:
-                # 其他平台使用Firefox
+                # 其他平台使用Chrome（统一使用Chrome避免Firefox问题）
                 default_config = {
-                    'driver_type': 'firefox',
+                    'driver_type': 'chrome',  # 统一使用Chrome
                     'timeout': 30,
                     'implicit_wait': 10,
                     'headless': False,
-                    'simulation_mode': False,
-                    'firefox_profile': None,
+                    'simulation_mode': False,  # 真实发布模式
                     'user_friendly': True
                 }
             

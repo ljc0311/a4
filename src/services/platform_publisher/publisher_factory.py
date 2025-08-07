@@ -78,10 +78,10 @@ class PublisherFactory:
         if platform_lower in cls.SELENIUM_PUBLISHERS:
             publisher_class = cls.SELENIUM_PUBLISHERS[platform_lower]
             try:
-                # 默认配置，启用模拟模式避免Chrome启动问题
+                # 默认配置，真实发布模式
                 default_config = {
-                    'simulation_mode': True,  # 默认启用模拟模式
-                    'headless': True,
+                    'simulation_mode': False,  # 真实发布模式
+                    'headless': False,  # 显示浏览器窗口便于调试
                     'timeout': 30
                 }
                 # 合并用户配置

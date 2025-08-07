@@ -43,6 +43,9 @@ class AppController:
         # 初始化服务管理器
         self.service_manager = ServiceManager(self.config_manager)
         
+        # 暴露API管理器以便其他组件访问
+        self.api_manager = None  # 将在initialize()中设置
+        
         # 初始化处理器
         self.text_processor = TextProcessor(self.service_manager)
         self.image_processor = ImageProcessor(self.service_manager)
@@ -81,6 +84,9 @@ class AppController:
             
             # 初始化服务管理器
             await self.service_manager.initialize()
+            
+            # 设置API管理器引用
+            self.api_manager = self.service_manager.api_manager
             
             # 检查服务状态
             service_status = await self.service_manager.check_all_services()

@@ -64,6 +64,7 @@ class YouTubePublisherManager:
             
             # 初始化Selenium发布器
             if self.config.get('selenium', {}).get('enabled', True):
+                # 使用原始配置，不强制启用模拟模式
                 self.selenium_publisher = YouTubeStealthPublisher(self.config['selenium'])
                 logger.info("🌐 YouTube Selenium发布器已初始化")
                 

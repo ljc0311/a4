@@ -1,0 +1,28 @@
+{
+  "test_component": {
+    "engine": "pollinations",
+    "width": 1024,
+    "height": 1024,
+    "style": "电影风格",
+    "steps": 20,
+    "cfg_scale": 7.5
+  },
+  "image_generation": {
+    "style": "动漫风格",
+    "engine": "pollinations",
+    "width": 864,
+    "height": 1152,
+    "steps": 25,
+    "cfg_scale": 7.5,
+    "seed_mode": "随机",
+    "sampler": "DPM++ 2M Karras",
+    "negative_prompt": "blurry, low quality, distorted, deformed, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs",
+    "batch_size": 1,
+    "retry_count": 2,
+    "delay": 1.0,
+    "concurrent_tasks": 3,
+    "model": "flux",
+    "enhance": true,
+    "logo": false
+  }
+}

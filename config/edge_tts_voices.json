@@ -1,0 +1,66 @@
+{
+  "voices": [
+    {
+      "id": "zh-CN-XiaoxiaoNeural",
+      "name": "Xiaoxiao",
+      "language": "zh-CN"
+    },
+    {
+      "id": "zh-CN-XiaoyiNeural",
+      "name": "Xiaoyi",
+      "language": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunjianNeural",
+      "name": "Yunjian",
+      "language": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunxiNeural",
+      "name": "Yunxi",
+      "language": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunxiaNeural",
+      "name": "Yunxia",
+      "language": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunyangNeural",
+      "name": "Yunyang",
+      "language": "zh-CN"
+    },
+    {
+      "id": "en-US-AvaNeural",
+      "name": "Ava",
+      "language": "en-US"
+    },
+    {
+      "id": "en-US-AndrewNeural",
+      "name": "Andrew",
+      "language": "en-US"
+    },
+    {
+      "id": "en-US-EmmaNeural",
+      "name": "Emma",
+      "language": "en-US"
+    },
+    {
+      "id": "en-US-BrianNeural",
+      "name": "Brian",
+      "language": "en-US"
+    },
+    {
+      "id": "en-US-AnaNeural",
+      "name": "Ana",
+      "language": "en-US"
+    },
+    {
+      "id": "en-US-AndrewMultilingualNeural",
+      "name": "AndrewMultilingual",
+      "language": "en-US"
+    }
+  ],
+  "updated_at": 279338.468,
+  "total_count": 12
+}

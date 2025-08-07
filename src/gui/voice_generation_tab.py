@@ -30,6 +30,10 @@ from src.gui.styles.unified_theme_system import UnifiedThemeSystem
 from src.gui.modern_ui_components import MaterialButton, MaterialCard
 from src.utils.shot_id_manager import ShotIDManager, ShotMapping
 from src.utils.intelligent_text_splitter import IntelligentTextSplitter, SplitConfig, create_voice_segments_with_duration_control
+from src.core.language_manager import LanguageManager
+from src.models.language_models import LanguageCode
+from src.gui.language_switch_dialog import LanguageSwitchDialog
+from src.services.bilingual_voice_service import BilingualVoiceService
 
 
 class VoiceGenerationThread(QThread):
@@ -63,8 +67,16 @@ class VoiceGenerationThread(QThread):
                 audio_filename = f"segment_{i+1:03d}_{segment.get('shot_id', 'unknown')}.mp3"
                 audio_path = os.path.join(self.output_dir, audio_filename)
                 
-                # 🔧 修复：生成配音（优先使用原文，如果没有则使用台词）
-                text_to_generate = segment.get('original_text', segment.get('dialogue_text', segment.get('text', '')))
+                # 🔧 修复：生成配音（优先使用翻译文本，其次是原文，最后是台词）
+                text_to_generate = segment.get('translated_text', segment.get('original_text', segment.get('dialogue_text', segment.get('text', ''))))
+                
+                # 🔧 添加调试日志
+                logger.info(f"🔧 [VoiceThread] 段落 {i+1}: {segment.get('shot_id', 'unknown')}")
+                logger.info(f"🔧 [VoiceThread] 原文: {segment.get('original_text', '')[:50]}...")
+                logger.info(f"🔧 [VoiceThread] 翻译文本: {segment.get('translated_text', 'None')}")
+                logger.info(f"🔧 [VoiceThread] 实际使用文本: {text_to_generate[:50]}...")
+                logger.info(f"🔧 [VoiceThread] 引擎: {self.engine_name}")
+                logger.info(f"🔧 [VoiceThread] 设置: {self.settings}")
 
                 # 检查是否有有效的文本内容
                 if not text_to_generate or not text_to_generate.strip():
@@ -202,6 +214,22 @@ class VoiceGenerationTab(QWidget):
         self.engine_manager = TTSEngineManager(self.config_manager)
         self.audio_file_manager = None
 
+        # 初始化语言管理器
+        self.language_manager = LanguageManager(self.config_manager)
+        
+        # 初始化双语语音服务
+        # 先尝试从app_controller获取api_manager，如果没有则从service_manager获取
+        api_manager = None
+        if hasattr(self.app_controller, 'api_manager') and self.app_controller.api_manager:
+            api_manager = self.app_controller.api_manager
+        elif hasattr(self.app_controller, 'service_manager') and self.app_controller.service_manager:
+            api_manager = self.app_controller.service_manager.api_manager
+        
+        self.bilingual_voice_service = BilingualVoiceService(
+            api_manager=api_manager,
+            language_manager=self.language_manager
+        )
+
         # 🔧 新增：统一镜头ID管理器
         self.shot_id_manager = ShotIDManager()
 
@@ -209,15 +237,86 @@ class VoiceGenerationTab(QWidget):
         self.text_splitter = IntelligentTextSplitter()
         self.target_duration = 10.0  # 默认目标时长10秒
 
+        # 语言切换状态管理
+        self.language_switch_in_progress = False
+
         # 数据
         self.storyboard_data = []
         self.voice_segments = []
         self.generated_audio = []
         self.generation_thread = None
         self.sound_effect_thread = None  # 🔧 新增：音效生成线程
-        
+
+        # 双语支持
+        self.chinese_voice_segments = []
+        self.english_voice_segments = []
+
         self.init_ui()
         self.apply_styles()
+
+        # 注册语言变更回调
+        
+    def ensure_bilingual_service_initialized(self):
+        """确保双语语音服务正确初始化"""
+        try:
+            # 检查API管理器
+            if not self.bilingual_voice_service.api_manager:
+                api_manager = None
+                
+                # 尝试多种方式获取API管理器
+                if hasattr(self.app_controller, 'api_manager') and self.app_controller.api_manager:
+                    api_manager = self.app_controller.api_manager
+                    logger.info("从app_controller.api_manager获取API管理器")
+                elif hasattr(self.app_controller, 'service_manager') and self.app_controller.service_manager:
+                    if hasattr(self.app_controller.service_manager, 'api_manager'):
+                        api_manager = self.app_controller.service_manager.api_manager
+                        logger.info("从app_controller.service_manager.api_manager获取API管理器")
+                
+                # 如果还是没有，尝试直接创建
+                if not api_manager:
+                    try:
+                        from src.core.api_manager import APIManager
+                        from src.utils.config_manager import ConfigManager
+                        config_manager = ConfigManager()
+                        api_manager = APIManager(config_manager)
+                        logger.info("直接创建新的API管理器")
+                    except Exception as e:
+                        logger.error(f"创建API管理器失败: {e}")
+                        return False
+                
+                if api_manager:
+                    self.bilingual_voice_service.api_manager = api_manager
+                    logger.info("API管理器已设置到双语语音服务")
+                else:
+                    logger.warning("无法获取或创建API管理器")
+                    return False
+            
+            # 检查LLM服务
+            if not self.bilingual_voice_service.llm_service and self.bilingual_voice_service.api_manager:
+                try:
+                    from src.services.bilingual_llm_service import BilingualLLMService
+                    self.bilingual_voice_service.llm_service = BilingualLLMService(
+                        self.bilingual_voice_service.api_manager, 
+                        self.bilingual_voice_service.language_manager
+                    )
+                    logger.info("双语LLM服务已初始化")
+                except Exception as e:
+                    logger.error(f"初始化双语LLM服务失败: {e}")
+                    return False
+            
+            # 验证服务是否可用
+            if (self.bilingual_voice_service.api_manager and 
+                self.bilingual_voice_service.llm_service):
+                logger.info("双语语音服务初始化验证成功")
+                return True
+            else:
+                logger.warning("双语语音服务初始化验证失败")
+                return False
+            
+        except Exception as e:
+            logger.error(f"初始化双语服务失败: {e}")
+            return False
+        self.language_manager.add_language_change_callback(self.on_voice_language_changed)
 
         # 加载项目设置
         self.load_voice_settings_from_project()
@@ -227,21 +326,86 @@ class VoiceGenerationTab(QWidget):
             self.project_manager.project_loaded.connect(self.on_project_loaded)
         # 延迟加载项目数据，避免初始化时卡住
         QTimer.singleShot(100, self.load_project_data)
-    
+
     def init_ui(self):
         """初始化UI界面"""
         main_layout = QVBoxLayout()
-        
+
         # 标题和状态栏
         self.create_header(main_layout)
-        
+
         # 主工作区域
         self.create_main_work_area(main_layout)
-        
+
         # 底部控制栏
         self.create_control_bar(main_layout)
-        
+
         self.setLayout(main_layout)
+
+    # [DELETED] This was the first, unused create_header method.
+
+    def on_voice_language_changed(self, new_language: LanguageCode):
+        """处理语言管理器的语言变更回调"""
+        try:
+            if self.language_switch_in_progress:
+                return
+                
+            logger.debug(f"语言管理器语言变更: {new_language.value}")
+            
+            # 更新语音语言下拉框
+            self._set_voice_language_combo_value(new_language)
+            
+            # 更新音色列表
+            self.update_voice_list_for_current_language()
+            
+        except Exception as e:
+            logger.error(f"处理语言变更回调时出错: {e}")
+    
+    def on_voice_language_combo_changed(self, language_text):
+        """处理配音语言下拉框变化"""
+        try:
+            if self.language_switch_in_progress:
+                return
+                
+            language_code_str = self.voice_language_combo.currentData()
+            new_language = LanguageCode.CHINESE if language_code_str == "zh-CN" else LanguageCode.ENGLISH
+            current_language = self.language_manager.current_language
+            
+            # 如果语言没有变化，直接返回
+            if new_language == current_language:
+                return
+                
+            logger.debug(f"配音语言选择变化: {current_language.value} -> {new_language.value}")
+            
+            # 检查是否需要显示确认对话框
+            has_unsaved_content = self._has_unsaved_voice_content()
+            
+            if has_unsaved_content or not self._get_skip_confirmation_setting():
+                # 显示确认对话框
+                confirmed, dont_ask_again = LanguageSwitchDialog.show_confirmation(
+                    current_language, new_language, has_unsaved_content, self
+                )
+                
+                if not confirmed:
+                    # 用户取消，恢复原来的选择
+                    self.language_switch_in_progress = True
+                    self._set_voice_language_combo_value(current_language)
+                    self.language_switch_in_progress = False
+                    return
+                
+                # 保存用户的"不再询问"选择
+                if dont_ask_again:
+                    self._set_skip_confirmation_setting(True)
+            
+            # 执行语言切换
+            self._perform_voice_language_switch(new_language)
+
+        except Exception as e:
+            logger.error(f"处理配音语言变化时出错: {e}")
+            # 发生错误时恢复原来的选择
+            self.language_switch_in_progress = True
+            self._set_voice_language_combo_value(self.language_manager.current_language)
+            self.language_switch_in_progress = False
 
     def apply_styles(self):
         """应用简洁现代化样式"""
@@ -378,6 +542,7 @@ class VoiceGenerationTab(QWidget):
                     border: 1px solid #CCCCCC;
                     height: 6px;
                     background: white;
+
                     margin: 2px 0;
                     border-radius: 3px;
                 }
@@ -459,6 +624,17 @@ class VoiceGenerationTab(QWidget):
         title_label.setStyleSheet("color: #333333; font-weight: bold;")
         title_layout.addWidget(title_label)
         title_layout.addStretch()
+
+        # 添加语言选择
+        self.voice_language_label = QLabel("配音语言:")
+        title_layout.addWidget(self.voice_language_label)
+
+        self.voice_language_combo = QComboBox()
+        self.voice_language_combo.addItem("中文", "zh-CN")
+        self.voice_language_combo.addItem("English", "en-US")
+        self.voice_language_combo.setCurrentIndex(0)  # 默认中文
+        self.voice_language_combo.currentTextChanged.connect(self.on_voice_language_combo_changed)
+        title_layout.addWidget(self.voice_language_combo)
 
         # 状态标签
         self.status_label = QLabel("请先加载项目数据")
@@ -597,13 +773,34 @@ class VoiceGenerationTab(QWidget):
         self.engine_combo.currentTextChanged.connect(self.on_voice_settings_changed)
         engine_layout.addRow("配音引擎:", self.engine_combo)
 
+        # 语言选择功能已移至顶部标题栏
+
         # 初始化时触发引擎改变事件，加载音色列表
         QTimer.singleShot(100, self.on_engine_changed)
 
         # 音色选择
+        voice_layout = QVBoxLayout()
+        
         self.voice_combo = QComboBox()
         self.voice_combo.currentTextChanged.connect(self.on_voice_settings_changed)
-        engine_layout.addRow("音色:", self.voice_combo)
+        self.voice_combo.currentTextChanged.connect(self.on_voice_selection_changed)
+        voice_layout.addWidget(self.voice_combo)
+        
+        # 音色详细信息显示
+        self.voice_info_label = QLabel("请选择音色查看详细信息")
+        self.voice_info_label.setStyleSheet("""
+            color: #666666;
+            font-size: 10px;
+            padding: 4px;
+            background-color: #F8F8F8;
+            border: 1px solid #E0E0E0;
+            border-radius: 3px;
+        """)
+        self.voice_info_label.setWordWrap(True)
+        self.voice_info_label.setMaximumHeight(60)
+        voice_layout.addWidget(self.voice_info_label)
+        
+        engine_layout.addRow("音色:", voice_layout)
 
         # 语速设置
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
@@ -641,6 +838,11 @@ class VoiceGenerationTab(QWidget):
         self.test_voice_btn = QPushButton("测试配音")
         self.test_voice_btn.clicked.connect(self.test_voice)
         preview_btn_layout.addWidget(self.test_voice_btn)
+
+        self.voice_preview_btn = QPushButton("音色试听")
+        self.voice_preview_btn.clicked.connect(self.preview_voice)
+        self.voice_preview_btn.setToolTip("使用示例文本试听当前选择的音色")
+        preview_btn_layout.addWidget(self.voice_preview_btn)
 
         self.play_audio_btn = QPushButton("播放音频")
         self.play_audio_btn.clicked.connect(self.play_audio)
@@ -2849,16 +3051,75 @@ class VoiceGenerationTab(QWidget):
     def on_engine_changed(self):
         """引擎改变时更新音色列表"""
         try:
-            engine_id = self.engine_combo.currentData()
-            if engine_id:
-                engine = self.engine_manager.get_engine(engine_id)
-                if engine:
-                    voices = engine.get_available_voices()
-                    self.voice_combo.clear()
-                    for voice in voices:
-                        self.voice_combo.addItem(voice['name'], voice['id'])
+            self.update_voice_list_for_current_language()
         except Exception as e:
             logger.error(f"更新音色列表失败: {e}")
+    
+    def update_voice_list_for_current_language(self):
+        """根据当前语言更新音色列表"""
+        try:
+            # 获取当前选择的语言
+            current_language = self.language_manager.current_language
+            
+            # 获取该语言的可用音色
+            available_voices = self.bilingual_voice_service.get_voices_for_language(current_language)
+            
+            # 清空并重新填充音色列表
+            self.voice_combo.clear()
+            
+            if not available_voices:
+                self.voice_combo.addItem("暂无可用音色", "")
+                self.voice_info_label.setText("当前语言暂无可用音色")
+                return
+            
+            # 按提供商和性别分组显示音色
+            providers = {}
+            for voice in available_voices:
+                if voice.provider not in providers:
+                    providers[voice.provider] = []
+                providers[voice.provider].append(voice)
+            
+            # 按优先级排序提供商
+            provider_priority = self.bilingual_voice_service.voice_model_manager.get_provider_priority(current_language)
+            
+            for provider in provider_priority:
+                if provider in providers:
+                    for voice in providers[provider]:
+                        # 构建显示名称，包含性别和风格信息
+                        display_name = f"{voice.name} ({voice.gender}, {voice.style})"
+                        self.voice_combo.addItem(display_name, voice.id)
+            
+            # 添加其他提供商的音色
+            for provider, voices in providers.items():
+                if provider not in provider_priority:
+                    for voice in voices:
+                        display_name = f"{voice.name} ({voice.gender}, {voice.style})"
+                        self.voice_combo.addItem(display_name, voice.id)
+            
+            # 设置默认选择
+            if self.voice_combo.count() > 0:
+                # 尝试选择语言配置中的默认音色
+                language_config = self.language_manager.get_language_config(current_language)
+                default_voice_id = language_config.voice_settings.default_voice_id
+                
+                for i in range(self.voice_combo.count()):
+                    if self.voice_combo.itemData(i) == default_voice_id:
+                        self.voice_combo.setCurrentIndex(i)
+                        break
+                else:
+                    # 如果没找到默认音色，选择第一个
+                    self.voice_combo.setCurrentIndex(0)
+                
+                # 更新音色信息显示
+                self.on_voice_selection_changed()
+            
+            logger.info(f"已更新 {current_language.value} 语言的音色列表，共 {len(available_voices)} 个音色")
+            
+        except Exception as e:
+            logger.error(f"更新语言音色列表失败: {e}")
+            self.voice_combo.clear()
+            self.voice_combo.addItem("加载失败", "")
+            self.voice_info_label.setText(f"加载音色列表失败: {str(e)}")
 
     def on_text_selection_changed(self):
         """文本选择改变时更新预览"""
@@ -2877,6 +3138,31 @@ class VoiceGenerationTab(QWidget):
                     self.play_audio_btn.setEnabled(False)
         except Exception as e:
             logger.error(f"更新预览失败: {e}")
+    
+    def on_voice_selection_changed(self):
+        """音色选择变更时更新详细信息显示"""
+        try:
+            voice_id = self.voice_combo.currentData()
+            if not voice_id:
+                self.voice_info_label.setText("请选择音色查看详细信息")
+                return
+            
+            # 获取音色详细信息
+            voice_details = self.bilingual_voice_service.get_voice_details(voice_id)
+            if voice_details:
+                info_text = (
+                    f"音色: {voice_details['name']}\n"
+                    f"性别: {voice_details['gender']} | "
+                    f"风格: {voice_details['style']} | "
+                    f"提供商: {voice_details['provider']}"
+                )
+                self.voice_info_label.setText(info_text)
+            else:
+                self.voice_info_label.setText("无法获取音色详细信息")
+                
+        except Exception as e:
+            logger.error(f"更新音色信息失败: {e}")
+            self.voice_info_label.setText("获取音色信息时出错")
 
     def select_all_rows(self):
         """全选所有行"""
@@ -2937,6 +3223,156 @@ class VoiceGenerationTab(QWidget):
         except Exception as e:
             logger.error(f"测试配音失败: {e}")
             QMessageBox.critical(self, "错误", f"测试失败: {e}")
+    
+    def preview_voice(self):
+        """音色试听功能"""
+        try:
+            voice_id = self.voice_combo.currentData()
+            if not voice_id:
+                QMessageBox.warning(self, "警告", "请先选择音色")
+                return
+            
+            # 获取当前语言
+            current_language = self.language_manager.current_language
+            
+            # 根据语言选择示例文本
+            if current_language == LanguageCode.CHINESE:
+                sample_text = "这是一段中文语音试听示例，用于测试当前选择音色的效果。"
+            else:
+                sample_text = "This is an English voice preview sample to test the selected voice quality."
+            
+            # 显示试听对话框
+            self.show_voice_preview_dialog(sample_text, voice_id, current_language)
+            
+        except Exception as e:
+            logger.error(f"音色试听失败: {e}")
+            QMessageBox.critical(self, "错误", f"音色试听失败: {e}")
+    
+    def show_voice_preview_dialog(self, text: str, voice_id: str, language: LanguageCode):
+        """显示音色试听对话框"""
+        try:
+            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("音色试听")
+            dialog.setModal(True)
+            dialog.resize(400, 300)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # 音色信息
+            voice_details = self.bilingual_voice_service.get_voice_details(voice_id)
+            if voice_details:
+                info_label = QLabel(f"音色: {voice_details['name']} ({voice_details['gender']}, {voice_details['style']})")
+                info_label.setStyleSheet("font-weight: bold; color: #333333;")
+                layout.addWidget(info_label)
+            
+            # 试听文本
+            text_label = QLabel("试听文本:")
+            layout.addWidget(text_label)
+            
+            text_edit = QTextEdit()
+            text_edit.setPlainText(text)
+            text_edit.setMaximumHeight(100)
+            layout.addWidget(text_edit)
+            
+            # 按钮区域
+            button_layout = QHBoxLayout()
+            
+            generate_btn = QPushButton("生成试听")
+            play_btn = QPushButton("播放")
+            play_btn.setEnabled(False)
+            close_btn = QPushButton("关闭")
+            
+            button_layout.addWidget(generate_btn)
+            button_layout.addWidget(play_btn)
+            button_layout.addStretch()
+            button_layout.addWidget(close_btn)
+            
+            layout.addLayout(button_layout)
+            
+            # 存储生成的音频路径
+            preview_audio_path = None
+            
+            def generate_preview():
+                nonlocal preview_audio_path
+                try:
+                    preview_text = text_edit.toPlainText().strip()
+                    if not preview_text:
+                        QMessageBox.warning(dialog, "警告", "请输入试听文本")
+                        return
+                    
+                    generate_btn.setEnabled(False)
+                    generate_btn.setText("生成中...")
+                    
+                    # 创建临时文件
+                    import tempfile
+                    import os
+                    temp_dir = tempfile.gettempdir()
+                    preview_audio_path = os.path.join(temp_dir, f"voice_preview_{voice_id}.mp3")
+                    
+                    # 启动生成线程
+                    self.preview_thread = VoiceGenerationThread(
+                        self.engine_manager, 
+                        self.engine_combo.currentData(),
+                        [{'text': preview_text, 'shot_id': 'preview'}],
+                        temp_dir, 
+                        self.get_current_voice_settings()
+                    )
+                    
+                    def on_preview_generated(result):
+                        generate_btn.setEnabled(True)
+                        generate_btn.setText("生成试听")
+                        if result.get('status') == 'success':
+                            play_btn.setEnabled(True)
+                            QMessageBox.information(dialog, "成功", "试听音频生成完成")
+                        else:
+                            QMessageBox.warning(dialog, "失败", "试听音频生成失败")
+                    
+                    def on_preview_error(error):
+                        generate_btn.setEnabled(True)
+                        generate_btn.setText("生成试听")
+                        QMessageBox.critical(dialog, "错误", f"生成失败: {error}")
+                    
+                    self.preview_thread.voice_generated.connect(on_preview_generated)
+                    self.preview_thread.error_occurred.connect(on_preview_error)
+                    self.preview_thread.start()
+                    
+                except Exception as e:
+                    generate_btn.setEnabled(True)
+                    generate_btn.setText("生成试听")
+                    QMessageBox.critical(dialog, "错误", f"生成试听失败: {e}")
+            
+            def play_preview():
+                if preview_audio_path and os.path.exists(preview_audio_path):
+                    try:
+                        # 使用系统默认播放器播放
+                        import subprocess
+                        import platform
+                        
+                        system = platform.system()
+                        if system == "Windows":
+                            os.startfile(preview_audio_path)
+                        elif system == "Darwin":  # macOS
+                            subprocess.run(["open", preview_audio_path])
+                        else:  # Linux
+                            subprocess.run(["xdg-open", preview_audio_path])
+                            
+                    except Exception as e:
+                        QMessageBox.warning(dialog, "播放失败", f"无法播放音频: {e}")
+                else:
+                    QMessageBox.warning(dialog, "警告", "请先生成试听音频")
+            
+            # 连接信号
+            generate_btn.clicked.connect(generate_preview)
+            play_btn.clicked.connect(play_preview)
+            close_btn.clicked.connect(dialog.close)
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            logger.error(f"显示音色试听对话框失败: {e}")
+            QMessageBox.critical(self, "错误", f"显示试听对话框失败: {e}")
 
     def on_test_voice_generated(self, result):
         """测试配音生成完成"""
@@ -3277,9 +3713,73 @@ class VoiceGenerationTab(QWidget):
             # 获取配音设置
             settings = self.get_current_voice_settings()
 
+            # 检查是否需要翻译
+            target_language_str = self.voice_language_combo.currentData()
+            target_language = LanguageCode.ENGLISH if target_language_str == "en-US" else LanguageCode.CHINESE
+
+            processed_segments = []
+            for segment in segments:
+                text_to_process = segment.get('original_text', segment.get('dialogue_text', segment.get('text', '')))
+                current_language = self.language_manager.detect_content_language(text_to_process)
+                
+                # 🔧 强制调试日志
+                logger.info(f"🔧 [Translation] 文本: {text_to_process[:50]}...")
+                logger.info(f"🔧 [Translation] 检测语言: {current_language.value}")
+                logger.info(f"🔧 [Translation] 目标语言: {target_language.value}")
+                logger.info(f"🔧 [Translation] 需要翻译: {current_language == LanguageCode.CHINESE and target_language == LanguageCode.ENGLISH}")
+
+                if current_language == LanguageCode.CHINESE and target_language == LanguageCode.ENGLISH:
+                    logger.info("🔧 [Translation] 开始执行翻译...")
+                    # 需要翻译
+                    self.status_label.setText(f"正在翻译: {text_to_process[:20]}...")
+                    QApplication.processEvents()
+                    
+                    # 确保BilingualVoiceService有api_manager
+                    # 确保双语服务已正确初始化
+                    if not self.ensure_bilingual_service_initialized():
+                        logger.error("翻译失败: 双语服务初始化失败")
+                        QMessageBox.warning(self, "警告", "翻译服务未初始化，将使用原文生成配音")
+                        processed_segments.append(segment)
+                        continue
+
+                    # 使用异步翻译方法
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        translated_text = loop.run_until_complete(
+                            self.bilingual_voice_service.translate_text_for_voice(
+                                text=text_to_process,
+                                source_language=LanguageCode.CHINESE,
+                                target_language=LanguageCode.ENGLISH,
+                                project_id="gui_voice_generation"
+                            )
+                        )
+                        loop.close()
+                    except Exception as e:
+                        logger.error(f"翻译异常: {e}")
+                        translated_text = None
+                    
+                    if translated_text:
+                        # 保存翻译后的文本，但不覆盖原文
+                        segment['translated_text'] = translated_text
+                        # 更新显示文本为翻译后的文本
+                        segment['display_text'] = translated_text
+                        processed_segments.append(segment)
+                        logger.info(f"🔧 [Translation] 翻译成功: {text_to_process[:20]}... -> {translated_text[:20]}...")
+                        logger.info(f"🔧 [Translation] segment keys: {list(segment.keys())}")
+                    else:
+                        logger.warning(f"翻译失败，使用原文: {text_to_process[:20]}...")
+                        processed_segments.append(segment)
+                else:
+                    processed_segments.append(segment)
+
+            if not processed_segments:
+                QMessageBox.warning(self, "警告", "没有可生成的文本段落。")
+                return
+
             # 启动生成线程
             self.generation_thread = VoiceGenerationThread(
-                self.engine_manager, engine_id, segments, output_dir, settings
+                self.engine_manager, engine_id, processed_segments, output_dir, settings
             )
             self.generation_thread.progress_updated.connect(self.on_generation_progress)
             self.generation_thread.voice_generated.connect(self.on_voice_generated)
@@ -3494,44 +3994,6 @@ class VoiceGenerationTab(QWidget):
         except Exception as e:
             logger.error(f"发送配音数据准备完成信号失败: {e}")
 
-    def _get_audio_duration(self, audio_path: str) -> float:
-        """🔧 新增：获取音频文件时长"""
-        try:
-            if not audio_path or not os.path.exists(audio_path):
-                return 3.0  # 默认3秒
-
-            # 方法1：尝试使用librosa
-            try:
-                import librosa
-                duration = librosa.get_duration(filename=audio_path)
-                return float(duration)
-            except ImportError:
-                pass
-
-            # 方法2：尝试使用mutagen
-            try:
-                from mutagen import File
-                audio_file = File(audio_path)
-                if audio_file and hasattr(audio_file, 'info') and hasattr(audio_file.info, 'length'):
-                    return float(audio_file.info.length)
-            except ImportError:
-                pass
-
-            # 方法3：简单的文件大小估算
-            try:
-                file_size = os.path.getsize(audio_path)
-                # 简单估算：假设平均比特率为128kbps
-                estimated_duration = file_size / (128 * 1024 / 8)
-                return max(1.0, float(estimated_duration))  # 最少1秒
-            except:
-                pass
-
-            return 3.0  # 默认3秒
-
-        except Exception as e:
-            logger.warning(f"获取音频时长失败: {e}")
-            return 3.0  # 默认3秒
-
     def _calculate_image_count_by_duration(self, duration: float) -> int:
         """🔧 修改：每个配音段落只生成1张图片，确保配音数量与图片数量一致"""
         return 1
@@ -3587,32 +4049,54 @@ class VoiceGenerationTab(QWidget):
 
             # 时长（尝试获取真实时长）
             audio_path = result.get('audio_path', '')
-            duration_text = self._get_audio_duration(audio_path) if audio_path else "--:--"
+            duration_float = self._get_audio_duration(audio_path) if audio_path else -1.0
+            
+            if duration_float >= 0:
+                mins, secs = divmod(duration_float, 60)
+                duration_text = f"{int(mins):02d}:{int(secs):02d}"
+            else:
+                duration_text = "--:--"
+            
             self.audio_list.setItem(row, 2, QTableWidgetItem(duration_text))
 
         except Exception as e:
             logger.error(f"添加到音频列表失败: {e}")
 
-    def _get_audio_duration(self, audio_path):
-        """获取音频文件时长"""
+    def _get_audio_duration(self, audio_path: str) -> float:
+        """获取音频文件时长（秒）"""
         try:
             if not audio_path or not os.path.exists(audio_path):
-                return "--:--"
+                return 3.0  # 默认3秒
 
-            # 🔧 修复：使用新的可靠音频时长检测器
-            from src.utils.reliable_audio_duration import get_audio_duration_string
-            duration_str = get_audio_duration_string(audio_path)
+            # 尝试使用mutagen
+            try:
+                from mutagen import File
+                audio_file = File(audio_path)
+                if audio_file and hasattr(audio_file, 'info') and hasattr(audio_file.info, 'length'):
+                    duration = float(audio_file.info.length)
+                    logger.info(f"✅ 成功获取音频时长: {duration:.2f}s - {os.path.basename(audio_path)}")
+                    return duration
+            except ImportError:
+                logger.warning("mutagen库未安装，无法精确获取音频时长。")
+            except Exception as e:
+                logger.warning(f"使用mutagen获取时长失败: {e}")
 
-            if duration_str != "00:00":
-                logger.info(f"✅ 成功获取音频时长: {duration_str} - {os.path.basename(audio_path)}")
-                return duration_str
-            else:
-                logger.warning(f"⚠️ 无法获取音频时长: {os.path.basename(audio_path)}")
-                return "--:--"
+            # 降级：简单的文件大小估算
+            try:
+                file_size = os.path.getsize(audio_path)
+                # 简单估算：假设平均比特率为128kbps = 16 KB/s
+                estimated_duration = file_size / (128 * 1024 / 8)
+                duration = max(1.0, float(estimated_duration))
+                logger.info(f"✅ 估算音频时长: {duration:.2f}s - {os.path.basename(audio_path)}")
+                return duration
+            except Exception as e:
+                logger.error(f"估算音频时长失败: {e}")
+
+            return 3.0  # 默认3秒
 
         except Exception as e:
-            logger.error(f"获取音频时长失败: {e}")
-            return "--:--"
+            logger.warning(f"获取音频时长失败: {e}")
+            return 3.0  # 默认3秒
 
     def import_from_text_creation(self):
         """从文本创作导入文本 - 智能匹配五阶段分镜"""
@@ -4676,8 +5160,19 @@ class VoiceGenerationTab(QWidget):
 
             logger.info(f"开始为 {len(segments_with_audio)} 个配音段落生成字幕")
 
+            # 为字幕生成准备文本
+            sub_segments = []
+            target_language_str = self.voice_language_combo.currentData()
+            target_language = LanguageCode.ENGLISH if target_language_str == "en-US" else LanguageCode.CHINESE
+            
+            for segment in segments_with_audio:
+                sub_segment = segment.copy()
+                if target_language == LanguageCode.ENGLISH and 'translated_text' in sub_segment:
+                    sub_segment['original_text'] = sub_segment['translated_text']
+                sub_segments.append(sub_segment)
+
             # 批量生成字幕
-            results = subtitle_generator.batch_generate_subtitles(segments_with_audio, "srt")
+            results = subtitle_generator.batch_generate_subtitles(sub_segments, "srt")
 
             if results['success_count'] > 0:
                 logger.info(f"字幕生成完成: 成功 {results['success_count']} 个，失败 {results['failed_count']} 个")
@@ -5040,3 +5535,69 @@ class VoiceGenerationTab(QWidget):
         except Exception as e:
             logger.error(f"AI分析单个段落失败: {e}")
             return None
+    def _has_unsaved_voice_content(self) -> bool:
+        """检查是否有未保存的配音内容"""
+        try:
+            # 检查是否有配音段落数据
+            if self.voice_segments:
+                return True
+            
+            # 检查是否有生成的音频
+            if self.generated_audio:
+                return True
+            
+            # 检查是否有正在进行的生成任务
+            if self.generation_thread and self.generation_thread.isRunning():
+                return True
+                
+            return False
+        except Exception as e:
+            logger.error(f"检查未保存配音内容时出错: {e}")
+            return False
+    
+    def _get_skip_confirmation_setting(self) -> bool:
+        """获取跳过确认对话框的设置"""
+        try:
+            return self.config_manager.get_setting('language_switch_skip_confirmation', False)
+        except Exception as e:
+            logger.error(f"获取跳过确认设置时出错: {e}")
+            return False
+    
+    def _set_skip_confirmation_setting(self, skip: bool):
+        """设置跳过确认对话框的选项"""
+        try:
+            self.config_manager.set_setting('language_switch_skip_confirmation', skip)
+            logger.info(f"语言切换确认设置已更新: skip={skip}")
+        except Exception as e:
+            logger.error(f"设置跳过确认选项时出错: {e}")
+    
+    def _set_voice_language_combo_value(self, language: LanguageCode):
+        """设置语音语言下拉框的值"""
+        try:
+            target_data = "zh-CN" if language == LanguageCode.CHINESE else "en-US"
+            for i in range(self.voice_language_combo.count()):
+                if self.voice_language_combo.itemData(i) == target_data:
+                    self.voice_language_combo.setCurrentIndex(i)
+                    break
+        except Exception as e:
+            logger.error(f"设置语音语言下拉框值时出错: {e}")
+    
+    def _perform_voice_language_switch(self, new_language: LanguageCode):
+        """执行语音语言切换"""
+        try:
+            self.language_switch_in_progress = True
+            
+            # 更新语言管理器
+            success = self.language_manager.set_language(new_language)
+            
+            if success:
+                logger.info(f"语音语言切换成功: {new_language.value}")
+                # 更新音色列表
+                self.update_voice_list_for_current_language()
+            else:
+                logger.error(f"语音语言切换失败: {new_language.value}")
+                
+        except Exception as e:
+            logger.error(f"执行语音语言切换时出错: {e}")
+        finally:
+            self.language_switch_in_progress = False

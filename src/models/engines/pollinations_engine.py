@@ -8,7 +8,7 @@ import os
 import time
 import urllib.parse
 from typing import List, Dict, Optional, Callable
-from ..image_engine_base import (
+from src.models.image_engine_base import (
     ImageGenerationEngine, EngineType, EngineStatus, 
     GenerationConfig, GenerationResult, EngineInfo, ConfigConverter
 )
@@ -21,7 +21,7 @@ class PollinationsEngine(ImageGenerationEngine):
     def __init__(self, config: Dict = None):
         super().__init__(EngineType.POLLINATIONS)
         self.config = config or {}
-        self.base_url = "https://image.pollinations.ai/prompt"
+        self.base_url = "https://image.pollinations.ai"
         # 默认输出目录，会在生成时动态更新
         self.output_dir = self.config.get('output_dir', 'temp/image_cache')
         self.session = None
@@ -36,9 +36,38 @@ class PollinationsEngine(ImageGenerationEngine):
             self.output_dir = self._get_output_dir()
             # 不在初始化时创建目录，只在实际生成图像时创建
             
-            # 创建requests会话
+            # 创建requests会话，配置SSL和连接参数
             self.session = requests.Session()
             self.session.timeout = 30  # 设置超时
+            
+            # 配置SSL和连接参数以解决连接问题
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            import urllib3
+            
+            # 禁用SSL警告（仅用于解决连接问题）
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            # 配置重试策略
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[429, 500, 502, 503, 504],
+            )
+            
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
+            
+            # 设置请求头
+            self.session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            })
             
             # 测试连接
             if await self.test_connection():
@@ -61,11 +90,84 @@ class PollinationsEngine(ImageGenerationEngine):
         try:
             if not self.session:
                 return False
+            
+            # 配置会话以处理SSL问题
+            import ssl
+            import urllib3
+            
+            # 创建一个新的会话用于测试，配置更宽松的SSL设置
+            test_session = requests.Session()
+            
+            # 配置适配器和重试策略
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            
+            retry_strategy = Retry(
+                total=2,
+                backoff_factor=0.5,
+                status_forcelist=[429, 500, 502, 503, 504],
+            )
+            
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            test_session.mount("http://", adapter)
+            test_session.mount("https://", adapter)
+            
+            # 设置更友好的请求头
+            test_session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'image/*,*/*;q=0.8',
+                'Connection': 'keep-alive',
+            })
                 
-            # 发送简单的测试请求
-            test_url = f"{self.base_url}/test?width=64&height=64"
-            response = self.session.get(test_url, timeout=10)
-            return response.status_code == 200
+            # 发送简单的测试请求 - 使用正确的API格式
+            test_prompt = "test"
+            test_url = f"{self.base_url}/prompt/{test_prompt}?width=64&height=64&nologo=true"
+            
+            logger.info(f"测试连接URL: {test_url}")
+            
+            # 尝试多种方式连接
+            response = None
+            
+            # 方法1：正常连接
+            try:
+                response = test_session.get(test_url, timeout=15, verify=True)
+            except (ssl.SSLError, urllib3.exceptions.SSLError) as ssl_error:
+                logger.warning(f"SSL连接失败，尝试不验证SSL: {ssl_error}")
+                # 方法2：不验证SSL证书（仅用于测试）
+                try:
+                    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                    response = test_session.get(test_url, timeout=15, verify=False)
+                except Exception as e2:
+                    logger.error(f"不验证SSL也失败: {e2}")
+                    return False
+            except Exception as e:
+                logger.error(f"连接测试异常: {e}")
+                return False
+            
+            if response:
+                logger.info(f"连接测试响应: {response.status_code}")
+                
+                # 检查是否返回图像
+                if response.status_code == 200:
+                    content_type = response.headers.get('content-type', '')
+                    is_image = content_type.startswith('image/')
+                    logger.info(f"连接测试成功，内容类型: {content_type}")
+                    
+                    # 如果测试成功，更新主会话的配置
+                    if is_image:
+                        self.session.headers.update(test_session.headers)
+                        # 如果需要不验证SSL，也更新主会话
+                        if not test_session.verify:
+                            self.session.verify = False
+                            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                    
+                    return is_image
+                else:
+                    logger.warning(f"连接测试失败: HTTP {response.status_code}")
+                    return False
+            else:
+                logger.error("无法获取响应")
+                return False
                 
         except Exception as e:
             logger.error(f"Pollinations连接测试失败: {e}")
@@ -207,7 +309,7 @@ class PollinationsEngine(ImageGenerationEngine):
     async def _generate_single_image(self, config: Dict, index: int) -> Optional[str]:
         """生成单张图像"""
         try:
-            # 构建请求参数 - 只包含Pollinations API支持的参数
+            # 构建请求参数 - 根据最新API文档更新
             params = {
                 'width': config['width'],
                 'height': config['height'],
@@ -217,8 +319,8 @@ class PollinationsEngine(ImageGenerationEngine):
                 'safe': str(config.get('safe', True)).lower()
             }
 
-            # 添加seed参数（如果存在）
-            if config.get('seed') is not None:
+            # 添加seed参数（如果存在且不为-1）
+            if config.get('seed') is not None and config.get('seed') != -1:
                 params['seed'] = config['seed'] + index  # 为每张图像使用不同种子
 
             # 添加private参数（如果存在）
@@ -228,50 +330,84 @@ class PollinationsEngine(ImageGenerationEngine):
             # 记录实际发送的参数
             logger.info(f"Pollinations API 请求参数: {params}")
 
-            # URL编码提示词
-            encoded_prompt = urllib.parse.quote(config['prompt'])
-            url = f"{self.base_url}/{encoded_prompt}"
+            # URL编码提示词 - 使用更安全的编码方式
+            prompt = config['prompt']
+            encoded_prompt = urllib.parse.quote(prompt, safe='')
+            
+            # 构建完整URL - 使用正确的API格式
+            url = f"{self.base_url}/prompt/{encoded_prompt}"
 
             # 发送请求 - 使用requests而不是aiohttp
+            logger.info(f"发送请求到: {url}")
+            logger.info(f"请求参数: {params}")
+            
             response = self.session.get(url, params=params, timeout=60)
+            
+            logger.info(f"响应状态码: {response.status_code}")
+            logger.info(f"响应头: {dict(response.headers)}")
 
             if response.status_code == 200:
+                # 检查响应内容类型
+                content_type = response.headers.get('content-type', '')
+                if not content_type.startswith('image/'):
+                    logger.warning(f"响应内容类型不是图像: {content_type}")
+                    # 尝试读取响应内容作为文本查看错误信息
+                    try:
+                        error_text = response.text[:500]  # 只读取前500字符
+                        logger.error(f"响应内容: {error_text}")
+                    except:
+                        pass
+                    return None
+
                 # 动态获取输出目录
                 current_output_dir = self._get_output_dir()
                 os.makedirs(current_output_dir, exist_ok=True)
 
-                # 🔧 修复：使用workflow_id生成唯一文件名，避免覆盖
+                # 生成唯一文件名
                 workflow_id = config.get('workflow_id', f'shot_{index}')
                 # 将workflow_id中的特殊字符替换为下划线，确保文件名安全
-                safe_workflow_id = workflow_id.replace('-', '_').replace(':', '_')
-                filename = f"pollinations_{safe_workflow_id}.png"
+                safe_workflow_id = workflow_id.replace('-', '_').replace(':', '_').replace(' ', '_')
+                timestamp = int(time.time())
+                filename = f"pollinations_{safe_workflow_id}_{timestamp}.png"
                 filepath = os.path.join(current_output_dir, filename)
 
+                # 保存图像文件
                 with open(filepath, 'wb') as f:
                     f.write(response.content)
 
-                logger.info(f"图像已保存: {filepath}")
-                return filepath
+                # 验证文件是否成功保存
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    logger.info(f"图像已保存: {filepath} (大小: {os.path.getsize(filepath)} 字节)")
+                    return filepath
+                else:
+                    logger.error(f"图像文件保存失败或文件为空: {filepath}")
+                    return None
             else:
                 logger.error(f"Pollinations请求失败: HTTP {response.status_code}")
                 logger.error(f"请求URL: {url}")
                 logger.error(f"请求参数: {params}")
+                
+                # 尝试读取错误响应内容
+                try:
+                    error_content = response.text[:1000]  # 读取前1000字符
+                    logger.error(f"错误响应内容: {error_content}")
+                except:
+                    logger.error("无法读取错误响应内容")
+                
                 return None
 
         except Exception as e:
             logger.error(f"生成单张图像失败: {e}")
+            import traceback
+            logger.error(f"详细错误信息: {traceback.format_exc()}")
             return None
     
     def get_available_models(self) -> List[str]:
         """获取可用模型"""
         return [
             'flux',
-            'flux-realism', 
-            'flux-cablyai',
-            'flux-anime',
-            'flux-3d',
-            'any-dark',
-            'flux-pro'
+            'turbo', 
+            'flux-realism'
         ]
     
     def get_engine_info(self) -> EngineInfo:

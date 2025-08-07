@@ -599,7 +599,7 @@ class LLMApi:
                 "contents": contents,
                 "generationConfig": {
                     "temperature": 0.7,
-                    "maxOutputTokens": 2048
+                    "maxOutputTokens": 4096  # 增加输出token限制，避免翻译被截断
                 }
             }
         else:

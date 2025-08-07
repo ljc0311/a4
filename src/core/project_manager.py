@@ -316,6 +316,9 @@ class ProjectManager:
             
             self.current_project = project_config
 
+            # 恢复语言设置
+            self._restore_language_settings()
+
             project_display_name = project_config.get('project_name') or project_config.get('name', '未知项目')
 
             # 🔧 修复：只在项目首次加载或切换时记录日志，避免频繁记录
@@ -337,6 +340,9 @@ class ProjectManager:
             
             # 更新最后修改时间
             self.current_project["last_modified"] = datetime.now().isoformat()
+            
+            # 保存语言设置
+            self._persist_language_settings()
             
             # 保存项目配置
             project_dir = Path(self.current_project["project_dir"])
@@ -1374,3 +1380,35 @@ class ProjectManager:
         except Exception as e:
             logger.error(f"更新项目统计失败: {e}")
             return False
+
+    def _persist_language_settings(self):
+        """将当前语言设置保存到项目文件"""
+        try:
+            from src.core.language_manager import LanguageManager
+            language_manager = LanguageManager()
+            
+            if self.current_project:
+                settings = language_manager.get_project_language_settings()
+                self.current_project['language_settings'] = settings.to_dict()
+                logger.debug("语言设置已保存到当前项目")
+        except Exception as e:
+            logger.error(f"保存语言设置失败: {e}")
+
+    def _restore_language_settings(self):
+        """从项目文件恢复语言设置"""
+        try:
+            from src.core.language_manager import LanguageManager
+            from src.models.language_models import ProjectLanguageSettings
+            
+            language_manager = LanguageManager()
+            
+            if self.current_project and 'language_settings' in self.current_project:
+                settings_data = self.current_project['language_settings']
+                settings = ProjectLanguageSettings.from_dict(settings_data)
+                language_manager.set_project_language_settings(settings)
+                logger.info(f"项目语言设置已恢复: {settings.voice_language.value}")
+            else:
+                # 如果项目中没有语言设置，则使用默认设置并保存
+                self._persist_language_settings()
+        except Exception as e:
+            logger.error(f"恢复语言设置失败: {e}")

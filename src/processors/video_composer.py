@@ -793,6 +793,230 @@ class VideoComposer:
             logger.error(f"合成最终视频失败: {e}")
             return False
     
+    def embed_subtitles_in_video_enhanced(self, 
+                                        video_path: str, 
+                                        subtitle_path: str, 
+                                        output_path: str,
+                                        subtitle_config: Dict = None,
+                                        enable_subtitles: bool = True) -> bool:
+        """
+        增强的字幕嵌入功能，支持字幕开关控制
+        
+        Args:
+            video_path: 输入视频文件路径
+            subtitle_path: 字幕文件路径（SRT格式）
+            output_path: 输出视频文件路径
+            subtitle_config: 字幕样式配置
+            enable_subtitles: 是否启用字幕显示
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            if not enable_subtitles:
+                # 如果禁用字幕，直接复制原视频
+                logger.info("字幕显示已禁用，复制原视频")
+                return self._copy_video_file(video_path, output_path)
+            
+            if not os.path.exists(video_path):
+                logger.error(f"视频文件不存在: {video_path}")
+                return False
+            
+            if not os.path.exists(subtitle_path):
+                logger.error(f"字幕文件不存在: {subtitle_path}")
+                return False
+            
+            # 使用现有的add_subtitles方法，但传入空的subtitle_segments
+            # 因为我们直接使用SRT文件
+            return self._embed_srt_subtitles(video_path, subtitle_path, output_path, subtitle_config)
+            
+        except Exception as e:
+            logger.error(f"增强字幕嵌入失败: {e}")
+            return False
+    
+    def _embed_srt_subtitles(self, video_path: str, subtitle_path: str, output_path: str, subtitle_config: Dict = None) -> bool:
+        """
+        直接嵌入SRT字幕文件
+        
+        Args:
+            video_path: 视频文件路径
+            subtitle_path: SRT字幕文件路径
+            output_path: 输出视频路径
+            subtitle_config: 字幕配置
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 转义字幕文件路径
+            srt_file_escaped = subtitle_path.replace('\\', '/').replace(':', '\\\\:')
+            
+            # 获取字幕样式配置
+            if subtitle_config is None:
+                subtitle_config = {}
+            
+            font_size = subtitle_config.get('font_size', 24)
+            font_color = subtitle_config.get('font_color', '#ffffff')
+            outline_color = subtitle_config.get('outline_color', '#000000')
+            outline_size = subtitle_config.get('outline_size', 2)
+            position = subtitle_config.get('position', '底部')
+            
+            # 转换颜色格式
+            font_color_bgr = self._hex_to_bgr(font_color)
+            outline_color_bgr = self._hex_to_bgr(outline_color)
+            
+            # 设置字幕位置
+            alignment = 2  # 底部居中
+            if position == "顶部":
+                alignment = 8  # 顶部居中
+            elif position == "中间":
+                alignment = 5  # 中间居中
+            
+            # 构建字幕样式
+            style = f"FontSize={font_size},PrimaryColour={font_color_bgr},OutlineColour={outline_color_bgr},Outline={outline_size},Alignment={alignment}"
+            
+            cmd = [
+                self.ffmpeg_path,
+                "-i", video_path,
+                "-vf", f"subtitles={srt_file_escaped}:force_style='{style}'",
+                "-c:a", "copy",
+                "-c:v", "libx264",
+                "-preset", "medium",
+                "-crf", "23",
+                "-y",
+                output_path
+            ]
+            
+            logger.info(f"开始嵌入SRT字幕: {video_path} -> {output_path}")
+            result = subprocess.run(cmd, capture_output=True, timeout=300)
+            
+            if result.returncode == 0:
+                logger.info(f"SRT字幕嵌入成功: {output_path}")
+                return True
+            else:
+                stderr = self._decode_output(result.stderr)
+                logger.error(f"SRT字幕嵌入失败: {stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"嵌入SRT字幕失败: {e}")
+            return False
+    
+    def _copy_video_file(self, source_path: str, output_path: str) -> bool:
+        """
+        复制视频文件
+        
+        Args:
+            source_path: 源视频路径
+            output_path: 输出视频路径
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            cmd = [
+                self.ffmpeg_path,
+                "-i", source_path,
+                "-c", "copy",  # 直接复制，不重新编码
+                "-y",
+                output_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            
+            if result.returncode == 0:
+                logger.info(f"视频复制成功: {output_path}")
+                return True
+            else:
+                stderr = self._decode_output(result.stderr)
+                logger.error(f"视频复制失败: {stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"复制视频失败: {e}")
+            return False
+    
+    def create_subtitle_preview_video(self, video_path: str, subtitle_path: str, output_path: str, 
+                                    preview_duration: float = 30.0, subtitle_config: Dict = None) -> bool:
+        """
+        创建字幕预览视频（只显示前N秒）
+        
+        Args:
+            video_path: 原视频路径
+            subtitle_path: 字幕文件路径
+            output_path: 预览视频输出路径
+            preview_duration: 预览时长（秒）
+            subtitle_config: 字幕配置
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 创建临时的预览视频（截取前N秒）
+            temp_preview_video = os.path.join(self.temp_dir, "temp_preview.mp4")
+            
+            # 截取视频前N秒
+            cut_cmd = [
+                self.ffmpeg_path,
+                "-i", video_path,
+                "-t", str(preview_duration),
+                "-c", "copy",
+                "-y",
+                temp_preview_video
+            ]
+            
+            result = subprocess.run(cut_cmd, capture_output=True, timeout=60)
+            if result.returncode != 0:
+                logger.error("创建预览视频片段失败")
+                return False
+            
+            # 在预览视频上添加字幕
+            success = self._embed_srt_subtitles(temp_preview_video, subtitle_path, output_path, subtitle_config)
+            
+            if success:
+                logger.info(f"字幕预览视频创建成功: {output_path}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"创建字幕预览视频失败: {e}")
+            return False
+    
+    def toggle_subtitle_in_video(self, video_with_subtitles: str, original_video: str, 
+                               output_path: str, enable_subtitles: bool) -> bool:
+        """
+        切换视频中的字幕显示
+        
+        Args:
+            video_with_subtitles: 带字幕的视频路径
+            original_video: 原始视频路径
+            output_path: 输出视频路径
+            enable_subtitles: 是否启用字幕
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            if enable_subtitles:
+                # 启用字幕，使用带字幕的视频
+                source_path = video_with_subtitles
+                logger.info("启用字幕显示")
+            else:
+                # 禁用字幕，使用原始视频
+                source_path = original_video
+                logger.info("禁用字幕显示")
+            
+            if not os.path.exists(source_path):
+                logger.error(f"源视频文件不存在: {source_path}")
+                return False
+            
+            # 复制对应的视频文件
+            return self._copy_video_file(source_path, output_path)
+            
+        except Exception as e:
+            logger.error(f"切换字幕显示失败: {e}")
+            return False
+    
     def cleanup(self):
         """清理临时文件"""
         try:

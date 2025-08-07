@@ -1765,6 +1765,13 @@ class FiveStageStoryboardTab(QWidget):
         self.model_combo = QComboBox()
         control_layout.addWidget(self.model_combo)
         
+        # 语言选择
+        control_layout.addWidget(QLabel("语言："))
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("中文", "zh")
+        self.language_combo.addItem("English", "en")
+        control_layout.addWidget(self.language_combo)
+
         # 角色管理按钮
         self.character_btn = QPushButton("👥 角色管理")
         self.character_btn.clicked.connect(self.open_character_dialog)

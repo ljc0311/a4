@@ -223,6 +223,25 @@ class ImageService(ServiceBase):
             return self.api_manager.config_manager.get_image_providers()
         return ['pollinations']  # 默认提供商
     
+    def _get_current_project_dir(self) -> Optional[str]:
+        """获取当前项目目录"""
+        try:
+            # 尝试从应用控制器获取项目目录
+            from src.core.app_controller import AppController
+            app_controller = AppController.get_instance()
+            
+            if hasattr(app_controller, 'project_manager') and app_controller.project_manager:
+                project_manager = app_controller.project_manager
+                if hasattr(project_manager, 'current_project') and project_manager.current_project:
+                    project_data = project_manager.current_project
+                    return project_data.get('project_dir') or project_data.get('project_root')
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"获取项目目录失败: {e}")
+            return None
+    
     async def _execute_request(self, api_config: APIConfig, **kwargs) -> ServiceResult:
         """执行图像生成API请求 - 优化版本"""
         try:
@@ -255,8 +274,50 @@ class ImageService(ServiceBase):
                     logger.debug(f"为提示词添加风格预设: {style}")
             
             # 使用优化的请求执行
-            response = await self._execute_single_request(api_config, prompt=prompt, 
-                                                        negative_prompt=negative_prompt, **kwargs)
+            # 创建清理后的kwargs，避免重复传递prompt和negative_prompt
+            clean_kwargs = {k: v for k, v in kwargs.items() if k not in ['prompt', 'negative_prompt']}
+            clean_kwargs['prompt'] = prompt
+            clean_kwargs['negative_prompt'] = negative_prompt
+            
+            response = await self._execute_single_request(api_config, **clean_kwargs)
+            
+            # 如果返回的是base64数据，保存为文件
+            if 'image_data' in response and 'format' in response and response['format'] == 'base64':
+                try:
+                    import base64
+                    import os
+                    from datetime import datetime
+                    
+                    # 获取项目目录和引擎名称
+                    project_dir = self._get_current_project_dir()
+                    provider_name = api_config.provider
+                    
+                    # 创建项目特定的图像目录
+                    if project_dir:
+                        output_dir = os.path.join(project_dir, "images", provider_name)
+                    else:
+                        # 如果没有项目目录，使用默认目录
+                        output_dir = os.path.join("output", "images", provider_name)
+                    
+                    os.makedirs(output_dir, exist_ok=True)
+                    
+                    # 生成文件名
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"generated_{timestamp}_{hash(prompt) % 10000}.png"
+                    image_path = os.path.join(output_dir, filename)
+                    
+                    # 保存图像
+                    image_bytes = base64.b64decode(response['image_data'])
+                    with open(image_path, 'wb') as f:
+                        f.write(image_bytes)
+                    
+                    # 更新响应数据
+                    response['image_path'] = image_path
+                    logger.info(f"图像已保存到: {image_path}")
+                    
+                except Exception as e:
+                    logger.error(f"保存图像文件失败: {e}")
+                    # 如果保存失败，仍然返回base64数据
             
             return ServiceResult(
                 success=True,
@@ -277,17 +338,20 @@ class ImageService(ServiceBase):
         prompt = kwargs.get('prompt', '')
         negative_prompt = kwargs.get('negative_prompt', '')
         
+        # 从kwargs中移除prompt和negative_prompt，避免重复传递
+        clean_kwargs = {k: v for k, v in kwargs.items() if k not in ['prompt', 'negative_prompt']}
+        
         # 根据不同提供商生成图像
         if api_config.provider.lower() == 'comfyui':
-            return await self._call_comfyui_api(api_config, prompt, negative_prompt, **kwargs)
+            return await self._call_comfyui_api(api_config, prompt, negative_prompt, **clean_kwargs)
         elif api_config.provider.lower() == 'pollinations':
-            return await self._call_pollinations_api(api_config, prompt, **kwargs)
+            return await self._call_pollinations_api(api_config, prompt, **clean_kwargs)
         elif api_config.provider.lower() == 'stability':
-            return await self._call_stability_api(api_config, prompt, negative_prompt, **kwargs)
+            return await self._call_stability_api(api_config, prompt, negative_prompt, **clean_kwargs)
         elif api_config.provider.lower() == 'cogview_3_flash':
-            return await self._call_cogview_api(api_config, prompt, **kwargs)
+            return await self._call_cogview_api(api_config, prompt, **clean_kwargs)
         elif api_config.provider.lower() == 'vheer':
-            return await self._call_vheer_api(api_config, prompt, **kwargs)
+            return await self._call_vheer_api(api_config, prompt, **clean_kwargs)
         else:
             raise ValueError(f"不支持的提供商: {api_config.provider}")
     
@@ -396,16 +460,38 @@ class ImageService(ServiceBase):
     
     async def _call_pollinations_api(self, api_config: APIConfig, prompt: str, **kwargs) -> Dict:
         """调用Pollinations API - 优化版本"""
-        params = {
-            'prompt': prompt,
-            'width': kwargs.get('width', 1024),
-            'height': kwargs.get('height', 1024),
-            'seed': kwargs.get('seed', -1),
-            'model': kwargs.get('model_name', 'flux')
-        }
+        # 构建参数字典，只包含非None值
+        params = {}
         
-        # 构建URL
-        url = f"{api_config.api_url}/prompt/{prompt}"
+        # 必需参数
+        params['width'] = kwargs.get('width', 1024)
+        params['height'] = kwargs.get('height', 1024)
+        
+        # 可选参数
+        if kwargs.get('seed') is not None and kwargs.get('seed') != -1:
+            params['seed'] = kwargs.get('seed')
+        
+        model = kwargs.get('model_name', 'flux')
+        if model:
+            params['model'] = model
+            
+        # 布尔参数
+        params['nologo'] = str(kwargs.get('nologo', True)).lower()
+        params['enhance'] = str(kwargs.get('enhance', False)).lower()
+        params['safe'] = str(kwargs.get('safe', True)).lower()
+        
+        # 构建URL - 修复重复的/prompt/路径问题
+        import urllib.parse
+        encoded_prompt = urllib.parse.quote(prompt, safe='')
+        
+        # 检查api_url是否已经包含/prompt路径
+        if api_config.api_url.endswith('/prompt') or api_config.api_url.endswith('/prompt/'):
+            # 如果URL以/prompt或/prompt/结尾，直接添加编码后的提示词
+            base_url = api_config.api_url.rstrip('/')  # 移除末尾的斜杠
+            url = f"{base_url}/{encoded_prompt}"
+        else:
+            # 如果URL不包含/prompt路径，添加完整路径
+            url = f"{api_config.api_url}/prompt/{encoded_prompt}"
         
         async with self.get_session() as session:
             try:
@@ -523,19 +609,40 @@ class ImageService(ServiceBase):
             ) as response:
                 if response.status == 200:
                     result = await response.json()
+                    logger.debug(f"CogView API响应: {result}")
+                    
                     if 'data' in result and len(result['data']) > 0:
                         image_data = result['data'][0]
+                        
+                        # 检查不同的响应格式
                         if 'b64_json' in image_data:
                             return {
                                 'image_data': image_data['b64_json'],
                                 'format': 'base64'
                             }
+                        elif 'url' in image_data:
+                            # 如果返回的是URL，下载图像并转换为base64
+                            image_url = image_data['url']
+                            async with session.get(image_url) as img_response:
+                                if img_response.status == 200:
+                                    image_bytes = await img_response.read()
+                                    import base64
+                                    b64_data = base64.b64encode(image_bytes).decode('utf-8')
+                                    return {
+                                        'image_data': b64_data,
+                                        'format': 'base64'
+                                    }
+                                else:
+                                    raise Exception(f"下载图像失败: {img_response.status}")
                         else:
-                            raise Exception("响应中没有找到b64_json数据")
+                            logger.error(f"未知的响应格式: {image_data}")
+                            raise Exception(f"响应中没有找到b64_json或url数据，实际字段: {list(image_data.keys())}")
                     else:
+                        logger.error(f"响应格式错误: {result}")
                         raise Exception("响应格式错误，没有找到data字段")
                 else:
                     error_text = await response.text()
+                    logger.error(f"CogView API错误响应: {error_text}")
                     raise Exception(f"CogView-3 Flash请求失败 (状态码: {response.status}): {error_text}")
 
     async def _call_vheer_api(self, api_config: APIConfig, prompt: str, **kwargs) -> Dict:

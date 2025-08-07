@@ -224,6 +224,9 @@ class ModernCardMainWindow(QMainWindow):
         
         # 初始化控制器
         self.app_controller = AppController()
+        
+        # 异步初始化AppController
+        self.init_app_controller_async()
 
         # 使用应用控制器的项目管理器实例（确保一致性）
         self.project_manager = self.app_controller.project_manager
@@ -263,6 +266,33 @@ class ModernCardMainWindow(QMainWindow):
         self.switch_to_page("workflow")
         
         logger.info("现代化卡片式主窗口初始化完成")
+    
+    def init_app_controller_async(self):
+        """异步初始化AppController"""
+        try:
+            import asyncio
+            from PyQt5.QtCore import QTimer
+            
+            def init_controller():
+                try:
+                    # 创建新的事件循环
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # 异步初始化AppController
+                    loop.run_until_complete(self.app_controller.initialize())
+                    
+                    loop.close()
+                    logger.info("AppController异步初始化完成")
+                    
+                except Exception as e:
+                    logger.error(f"AppController异步初始化失败: {e}")
+            
+            # 使用QTimer延迟执行，避免阻塞UI
+            QTimer.singleShot(100, init_controller)
+            
+        except Exception as e:
+            logger.error(f"启动AppController异步初始化失败: {e}")
     
     def setup_memory_monitoring(self):
         """设置内存监控"""
@@ -811,9 +841,27 @@ class ModernCardMainWindow(QMainWindow):
         model_section_layout.addWidget(model_label)
         model_section_layout.addWidget(self.model_combo, 1)
 
-        # 将两个部分添加到配置行
+        # 语言选择部分
+        language_section = QWidget()
+        language_section_layout = QHBoxLayout(language_section)
+        language_section_layout.setContentsMargins(0, 0, 0, 0)
+
+        language_label = QLabel("语言")
+        language_label.setFont(QFont("Microsoft YaHei UI", 11, QFont.Medium))
+        language_label.setStyleSheet("color: #2c3e50; min-width: 80px;")
+
+        self.language_combo = QComboBox()
+        self.language_combo.addItems(["中文", "English"])
+        self.language_combo.setMinimumHeight(40)
+        self.language_combo.setStyleSheet(combo_style)
+
+        language_section_layout.addWidget(language_label)
+        language_section_layout.addWidget(self.language_combo, 1)
+
+        # 将三个部分添加到配置行
         config_row_layout.addWidget(style_section, 1)
         config_row_layout.addWidget(model_section, 1)
+        config_row_layout.addWidget(language_section, 1)
         config_layout.addWidget(config_row)
 
         config_card.add_layout(config_layout)

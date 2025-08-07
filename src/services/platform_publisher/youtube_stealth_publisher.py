@@ -55,12 +55,13 @@ class YouTubeStealthPublisher(SeleniumPublisherBase):
         
         # 🔧 语言和地区
         options.add_argument('--lang=zh-CN')
-        options.add_preference('intl.accept_languages', 'zh-CN,zh,en-US,en')
+        prefs = {"intl.accept_languages": "zh-CN,zh,en-US,en"}
         
         # 🔧 禁用图片加载（可选，提高速度）
         if self.selenium_config.get('disable_images', False):
-            prefs = {"profile.managed_default_content_settings.images": 2}
-            options.add_experimental_option("prefs", prefs)
+            prefs["profile.managed_default_content_settings.images"] = 2
+            
+        options.add_experimental_option("prefs", prefs)
         
         try:
             # 优先尝试连接调试模式
@@ -166,6 +167,11 @@ class YouTubeStealthPublisher(SeleniumPublisherBase):
     async def _check_login_status(self) -> bool:
         """检查YouTube登录状态"""
         try:
+            # 🔧 修复：模拟模式下直接返回已登录
+            if self.selenium_config.get('simulation_mode', False):
+                logger.info("🎭 YouTube模拟模式：模拟登录状态检查成功")
+                return True
+                
             # 访问YouTube Studio
             self.driver.get("https://studio.youtube.com")
             await asyncio.sleep(3)
@@ -191,6 +197,23 @@ class YouTubeStealthPublisher(SeleniumPublisherBase):
         """上传视频到YouTube"""
         try:
             logger.info("🚀 开始YouTube视频上传...")
+            
+            # 🔧 修复：模拟模式下直接返回成功结果
+            if self.selenium_config.get('simulation_mode', False):
+                logger.info("🎭 YouTube模拟模式：模拟视频上传")
+                title = video_info.get('title', '未命名视频')
+                import time
+                mock_video_id = f"mock_yt_{int(time.time())}"
+                logger.info(f"🎭 YouTube模拟上传成功: {title}")
+                return {
+                    'success': True,
+                    'video_id': mock_video_id,
+                    'video_url': f'https://youtube.com/watch?v={mock_video_id}',
+                    'platform': 'youtube',
+                    'title': title,
+                    'upload_time': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'message': f'模拟上传成功: {title}'
+                }
             
             # 检查登录状态
             if not await self._check_login_status():
@@ -400,3 +423,7 @@ class YouTubeStealthPublisher(SeleniumPublisherBase):
         except Exception as e:
             logger.error(f"❌ 发布视频失败: {e}")
             return False
+
+    async def _publish_video_impl(self, video_info: Dict[str, Any]) -> Dict[str, Any]:
+        """具体的视频发布实现 - 实现抽象方法"""
+        return await self.upload_video(video_info)

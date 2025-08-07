@@ -150,59 +150,60 @@ class SimpleChromeKuaishouPublisher(SeleniumPublisherBase):
                 ".title-field"
             ],
             'description_input': [
-                # 成功方案优先 - 基于实际测试结果
-                "div[contenteditable='true'][placeholder*='描述']",  # ✅ 实际成功的选择器
+                # 🔧 基于2024年快手页面的实际选择器
+                "//div[@contenteditable='true' and contains(@placeholder, '作品描述')]",  # 精确匹配作品描述
+                "//div[@contenteditable='true' and contains(@placeholder, '描述')]",
+                "//div[@contenteditable='true' and contains(@placeholder, '简介')]",
+                "//div[@contenteditable='true' and @placeholder]",  # 任何有placeholder的contenteditable
+                
+                # CSS选择器备用
+                "div[contenteditable='true'][placeholder*='作品描述']",
+                "div[contenteditable='true'][placeholder*='描述']",
                 "div[contenteditable='true'][placeholder*='简介']",
                 "div[contenteditable='true'][data-placeholder*='描述']",
                 "div[contenteditable='true'][data-placeholder*='简介']",
-                # contenteditable变体
-                ".description-input div[contenteditable='true']",
-                ".desc-input div[contenteditable='true']",
-                ".form-item-desc div[contenteditable='true']",
+                
+                # 位置选择器（描述通常在标题下方）
                 "div[contenteditable='true']:nth-of-type(2)",
-                # 传统输入框（备用）
+                ".form-item:nth-child(2) div[contenteditable='true']",
+                
+                # 通用contenteditable（最后备用）
+                "div[contenteditable='true']",
                 "textarea[placeholder*='描述']",
                 "textarea[placeholder*='简介']",
-                "textarea[placeholder*='请输入简介']",
-                "textarea[placeholder*='请输入描述']",
-                # React/Vue组件选择器
                 "[data-testid*='desc']",
-                "[data-testid*='description']",
                 "[aria-label*='简介']",
-                "[aria-label*='描述']",
-                # 类名选择器
-                ".description-input textarea",
-                ".desc-input textarea",
-                ".desc-editor",
-                ".description-field"
+                "[aria-label*='描述']"
             ],
             'publish_button': [
-                # 🎯 2024年快手真正的红色发布按钮（基于用户截图）
-                "//button[contains(@style, 'background') and text()='发布']",  # 红色背景的发布按钮
-                "//button[contains(@class, 'ant-btn-primary') and text()='发布']",  # Ant Design主要按钮
-                "//div[contains(@class, 'publish')]//button[text()='发布']",  # 发布区域内的按钮
-                "//button[@type='button' and text()='发布' and contains(@class, 'ant-btn')]",  # Ant按钮
-
-                # 🔍 更精确的定位（基于页面底部位置）
-                "//div[contains(@class, 'footer') or contains(@class, 'bottom')]//button[text()='发布']",
-                "//div[last()]//button[text()='发布']",  # 页面最后一个div中的发布按钮
-                "//button[text()='发布' and position()=last()]",  # 最后一个发布按钮
-
-                # 🎨 基于样式特征的选择器
-                "//button[contains(@class, 'primary') and text()='发布']",
-                "//button[contains(@class, 'red') and text()='发布']",
-                "//button[contains(@class, 'danger') and text()='发布']",
-
-                # 📍 精确文本匹配
+                # 🎯 2024年快手发布按钮（基于实际页面结构）
+                "//button[normalize-space(text())='发布' and contains(@class, 'ant-btn')]",  # Ant Design按钮
+                "//button[text()='发布' and contains(@class, 'ant-btn-primary')]",  # 主要按钮样式
+                "//button[text()='发布' and contains(@class, 'primary')]",  # 主要按钮
+                
+                # 🔍 基于页面位置的精确定位
+                "//div[contains(@class, 'publish-area') or contains(@class, 'footer') or contains(@class, 'bottom')]//button[text()='发布']",
+                "//div[@class and contains(@class, 'ant-')]//button[text()='发布']",  # Ant Design容器内的按钮
+                
+                # 🎨 基于按钮样式特征
+                "//button[text()='发布' and contains(@style, 'background-color')]",  # 有背景色的按钮
+                "//button[text()='发布' and contains(@style, 'background')]",
+                "//button[text()='发布' and @style]",  # 有内联样式的按钮
+                
+                # 📍 精确文本匹配（优先级高）
                 "//button[text()='发布']",
-                "//span[text()='发布']/parent::button",
                 "//button[normalize-space(text())='发布']",
-
-                # 🔄 备用选择器（降级使用）
-                "//button[contains(text(), '发布') and not(contains(text(), '设置')) and not(contains(text(), '时间'))]",
+                "//span[text()='发布']/parent::button",
+                "//div[text()='发布']/parent::button",
+                
+                # 🔄 通用备用选择器
+                "//button[contains(text(), '发布') and not(contains(text(), '设置')) and not(contains(text(), '时间')) and not(contains(text(), '定时'))]",
                 "button:contains('发布')",
                 ".ant-btn-primary",
-                "button[type='submit']"
+                "button[type='submit']",
+                
+                # 🎯 最后的备用方案：查找所有可能的发布按钮
+                "//button[@type='button' and contains(text(), '发布')]"
             ],
             'upload_progress': [
                 # 上传进度
@@ -699,36 +700,120 @@ class SimpleChromeKuaishouPublisher(SeleniumPublisherBase):
         time.sleep(delay)
 
     def _simulate_human_typing(self, element, text: str):
-        """模拟人类打字行为 - 支持contenteditable元素"""
+        """模拟人类打字行为 - 增强的contenteditable元素支持"""
         try:
             # 检查是否是contenteditable元素
             is_contenteditable = element.get_attribute('contenteditable') == 'true'
+            tag_name = element.tag_name.lower()
+
+            logger.info(f"🔧 输入文本到元素: tag={tag_name}, contenteditable={is_contenteditable}, text={text[:50]}...")
 
             if is_contenteditable:
-                # 对于contenteditable元素，使用JavaScript设置内容
-                logger.info("🔧 检测到contenteditable元素，使用JavaScript设置内容")
-                self.driver.execute_script("""
-                    arguments[0].focus();
-                    arguments[0].innerHTML = '';
-                    arguments[0].innerText = arguments[1];
-                    arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                """, element, text)
-                time.sleep(0.5)
+                # 🔧 增强的contenteditable元素处理
+                logger.info("🔧 检测到contenteditable元素，使用增强JavaScript方法")
+                
+                # 方法1: 完整的contenteditable处理
+                try:
+                    self.driver.execute_script("""
+                        var element = arguments[0];
+                        var text = arguments[1];
+                        
+                        // 确保元素获得焦点
+                        element.focus();
+                        
+                        // 清空现有内容
+                        element.innerHTML = '';
+                        element.innerText = '';
+                        
+                        // 设置新内容
+                        element.innerText = text;
+                        
+                        // 触发所有相关事件
+                        element.dispatchEvent(new Event('focus', { bubbles: true }));
+                        element.dispatchEvent(new Event('input', { bubbles: true }));
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        element.dispatchEvent(new Event('blur', { bubbles: true }));
+                        
+                        // 确保光标位置正确
+                        var range = document.createRange();
+                        var sel = window.getSelection();
+                        range.selectNodeContents(element);
+                        range.collapse(false);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                        
+                        console.log('✅ contenteditable内容设置完成:', text);
+                    """, element, text)
+                    
+                    time.sleep(0.5)
+                    logger.info("✅ 方法1成功: 增强JavaScript设置")
+                    return
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ 方法1失败: {e}")
+
+                # 方法2: 简化的contenteditable处理
+                try:
+                    logger.info("🔄 尝试方法2: 简化contenteditable处理")
+                    element.click()  # 确保获得焦点
+                    time.sleep(0.2)
+                    
+                    # 清空内容
+                    element.send_keys(Keys.CONTROL + "a")  # 全选
+                    time.sleep(0.1)
+                    element.send_keys(Keys.DELETE)  # 删除
+                    time.sleep(0.2)
+                    
+                    # 输入新内容
+                    element.send_keys(text)
+                    time.sleep(0.3)
+                    
+                    logger.info("✅ 方法2成功: 键盘操作")
+                    return
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ 方法2失败: {e}")
+
             else:
                 # 传统input/textarea元素
-                element.clear()
-                for char in text:
-                    element.send_keys(char)
-                    time.sleep(random.uniform(0.05, 0.15))
+                logger.info("🔧 处理传统input/textarea元素")
+                try:
+                    element.clear()
+                    time.sleep(0.2)
+                    
+                    # 模拟人类打字速度
+                    for char in text:
+                        element.send_keys(char)
+                        time.sleep(random.uniform(0.05, 0.15))
+                    
+                    logger.info("✅ 传统元素输入成功")
+                    return
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ 传统元素输入失败: {e}")
+
         except Exception as e:
-            logger.warning(f"⚠️ 文本输入失败，尝试备用方法: {e}")
-            # 备用方法：直接使用send_keys
+            logger.warning(f"⚠️ 文本输入失败，尝试最终备用方法: {e}")
+
+        # 🔧 最终备用方法：直接使用send_keys
+        try:
+            logger.info("🔄 使用最终备用方法: 直接send_keys")
+            element.click()
+            time.sleep(0.2)
+            element.clear()
+            time.sleep(0.2)
+            element.send_keys(text)
+            time.sleep(0.3)
+            logger.info("✅ 最终备用方法成功")
+            
+        except Exception as e2:
+            logger.error(f"❌ 所有文本输入方法都失败: {e2}")
+            # 最后尝试JavaScript强制设置
             try:
-                element.clear()
-                element.send_keys(text)
-            except Exception as e2:
-                logger.error(f"❌ 备用文本输入方法也失败: {e2}")
+                self.driver.execute_script("arguments[0].value = arguments[1];", element, text)
+                logger.info("✅ JavaScript强制设置成功")
+            except:
+                logger.error("❌ JavaScript强制设置也失败")
 
     async def _try_upload_methods(self, upload_element, video_path: str) -> bool:
         """尝试多种方法上传文件 - 基于2023年成功案例优化"""

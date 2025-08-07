@@ -17,6 +17,7 @@ from .service_base import ServiceBase, ServiceResult
 from src.services.llm_service import LLMService
 from src.services.image_service import ImageService
 from src.services.voice_service import VoiceService
+from src.services.subtitle_service import SubtitleService
 from src.utils.memory_optimizer import memory_manager, monitor_memory
 from src.utils.async_task_manager import task_manager, create_task
 
@@ -25,6 +26,7 @@ class ServiceType(Enum):
     LLM = "llm"
     IMAGE = "image"
     VOICE = "voice"
+    SUBTITLE = "subtitle"
     TRANSLATION = "translation"
     VIDEO = "video"
 
@@ -120,6 +122,10 @@ class ServiceManager:
             self.services[ServiceType.VOICE] = VoiceService(self.api_manager)
             logger.info("语音服务初始化完成")
             
+            # 初始化字幕服务
+            self.services[ServiceType.SUBTITLE] = SubtitleService()
+            logger.info("字幕服务初始化完成")
+
             # TODO: 初始化其他服务
             # self.services[ServiceType.TRANSLATION] = TranslationService(self.api_manager)
             # self.services[ServiceType.VIDEO] = VideoService(self.api_manager)

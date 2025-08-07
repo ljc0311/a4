@@ -98,13 +98,170 @@ class APIManager:
                 )
                 self.apis[APIType.LLM].append(api_config)
             
-            # TODO: 加载其他类型API配置
-            # 图像生成、语音合成等配置
+            # 加载TTS配置
+            self._load_tts_configs()
+            
+            # 加载图像生成API配置
+            self._load_image_generation_configs()
             
             logger.info(f"已加载 {len(self.apis[APIType.LLM])} 个LLM API配置")
+            logger.info(f"已加载 {len(self.apis[APIType.TEXT_TO_SPEECH])} 个TTS API配置")
+            logger.info(f"已加载 {len(self.apis[APIType.IMAGE_GENERATION])} 个图像生成 API配置")
             
         except Exception as e:
             logger.error(f"加载API配置失败: {e}")
+    
+    def _load_tts_configs(self):
+        """加载TTS配置"""
+        try:
+            import os
+            import json
+            
+            # 获取TTS配置文件路径
+            config_dir = self.config_manager.config_dir
+            tts_config_path = os.path.join(config_dir, 'tts_config.json')
+            
+            if not os.path.exists(tts_config_path):
+                logger.warning(f"TTS配置文件不存在: {tts_config_path}")
+                return
+            
+            with open(tts_config_path, 'r', encoding='utf-8') as f:
+                tts_config = json.load(f)
+            
+            # 加载Edge-TTS配置
+            if tts_config.get('edge_tts', {}).get('enabled', False):
+                edge_tts_config = APIConfig(
+                    name="Edge-TTS",
+                    api_type=APIType.TEXT_TO_SPEECH,
+                    provider="azure",
+                    api_key="",  # Edge-TTS不需要API密钥
+                    api_url="",  # Edge-TTS不需要URL
+                    model_name="edge-tts",
+                    priority=1,
+                    enabled=True,
+                    extra_params={
+                        'default_voice': tts_config.get('default_voice', 'zh-CN-YunxiNeural'),
+                        'default_rate': tts_config.get('default_rate', 1.0),
+                        'default_volume': tts_config.get('default_volume', 1.0),
+                        'output_format': tts_config.get('output_format', 'mp3'),
+                        'output_dir': tts_config.get('audio', {}).get('output_dir', 'output/audio')
+                    }
+                )
+                self.apis[APIType.TEXT_TO_SPEECH].append(edge_tts_config)
+                logger.info("已加载Edge-TTS配置")
+            
+            # 加载SiliconFlow TTS配置
+            siliconflow_config = tts_config.get('siliconflow', {})
+            if siliconflow_config.get('enabled', False) and siliconflow_config.get('api_key'):
+                sf_tts_config = APIConfig(
+                    name="SiliconFlow-TTS",
+                    api_type=APIType.TEXT_TO_SPEECH,
+                    provider="siliconflow",
+                    api_key=siliconflow_config.get('api_key', ''),
+                    api_url=siliconflow_config.get('base_url', 'https://api.siliconflow.cn/v1'),
+                    model_name="tts-1",
+                    priority=2,
+                    enabled=True,
+                    extra_params={
+                        'output_format': tts_config.get('output_format', 'mp3'),
+                        'output_dir': tts_config.get('audio', {}).get('output_dir', 'output/audio')
+                    }
+                )
+                self.apis[APIType.TEXT_TO_SPEECH].append(sf_tts_config)
+                logger.info("已加载SiliconFlow TTS配置")
+                
+        except Exception as e:
+            logger.error(f"加载TTS配置失败: {e}")
+    
+    def _load_image_generation_configs(self):
+        """加载图像生成API配置"""
+        try:
+            import os
+            import sys
+            
+            # 获取图像生成配置文件路径
+            config_dir = self.config_manager.config_dir
+            image_config_path = os.path.join(config_dir, 'image_generation_config.py')
+            
+            if not os.path.exists(image_config_path):
+                logger.warning(f"图像生成配置文件不存在: {image_config_path}")
+                return
+            
+            # 动态导入配置模块
+            sys.path.insert(0, config_dir)
+            try:
+                import image_generation_config
+                config = image_generation_config.get_config('development')
+                
+                # 加载各个引擎的配置
+                engines = config.get('engines', {})
+                
+                # Pollinations AI (免费)
+                if engines.get('pollinations', {}).get('enabled', False):
+                    pollinations_config = APIConfig(
+                        name="Pollinations AI",
+                        api_type=APIType.IMAGE_GENERATION,
+                        provider="pollinations",
+                        api_key="",  # 免费服务不需要API密钥
+                        api_url="https://image.pollinations.ai/prompt/",
+                        model_name="flux",
+                        priority=1,
+                        enabled=True,
+                        extra_params=engines.get('pollinations', {})
+                    )
+                    self.apis[APIType.IMAGE_GENERATION].append(pollinations_config)
+                    logger.info("已加载Pollinations AI配置")
+                
+                # CogView-3 Flash (智谱AI免费)
+                if engines.get('cogview_3_flash', {}).get('enabled', False):
+                    # 从LLM配置中获取智谱AI的API密钥
+                    zhipu_api_key = ""
+                    for llm_api in self.apis[APIType.LLM]:
+                        if llm_api.provider == "zhipu":
+                            zhipu_api_key = llm_api.api_key
+                            break
+                    
+                    if zhipu_api_key:
+                        cogview_config = APIConfig(
+                            name="CogView-3 Flash",
+                            api_type=APIType.IMAGE_GENERATION,
+                            provider="cogview_3_flash",
+                            api_key=zhipu_api_key,
+                            api_url="https://open.bigmodel.cn/api/paas/v4/images/generations",
+                            model_name="cogview-3-flash",
+                            priority=2,
+                            enabled=True,
+                            extra_params=engines.get('cogview_3_flash', {})
+                        )
+                        self.apis[APIType.IMAGE_GENERATION].append(cogview_config)
+                        logger.info("已加载CogView-3 Flash配置")
+                    else:
+                        logger.warning("未找到智谱AI API密钥，跳过CogView-3 Flash配置")
+                
+                # ComfyUI本地
+                comfyui_config = engines.get('comfyui', {})
+                if comfyui_config.get('local', {}).get('enabled', False):
+                    local_config = APIConfig(
+                        name="ComfyUI Local",
+                        api_type=APIType.IMAGE_GENERATION,
+                        provider="comfyui_local",
+                        api_key="",
+                        api_url=comfyui_config['local'].get('url', 'http://127.0.0.1:8188'),
+                        model_name="comfyui",
+                        priority=3,
+                        enabled=True,
+                        extra_params=comfyui_config.get('local', {})
+                    )
+                    self.apis[APIType.IMAGE_GENERATION].append(local_config)
+                    logger.info("已加载ComfyUI Local配置")
+                
+            finally:
+                # 清理sys.path
+                if config_dir in sys.path:
+                    sys.path.remove(config_dir)
+                    
+        except Exception as e:
+            logger.error(f"加载图像生成配置失败: {e}")
     
     def get_available_apis(self, api_type: APIType, provider: Optional[str] = None) -> List[APIConfig]:
         """获取可用的API列表"""

@@ -148,15 +148,10 @@ class ImageGenerationThread(QThread):
                 
                 # 异步调用图像生成服务 - 使用更安全的方式
                 import asyncio
-                try:
-                    # 尝试获取当前事件循环
-                    loop = asyncio.get_event_loop()
-                    if loop.is_closed():
-                        raise RuntimeError("Event loop is closed")
-                except RuntimeError:
-                    # 如果没有当前循环或循环已关闭，创建新的
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                
+                # 创建新的事件循环，避免与主线程冲突
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 
                 try:
                     result = loop.run_until_complete(self.image_generation_service.generate_image(
@@ -167,15 +162,11 @@ class ImageGenerationThread(QThread):
                         current_project_name=self.current_project_name
                     ))
                 finally:
-                    # 确保循环状态正确
-                    if loop.is_running():
-                        pass  # 如果循环正在运行，不要关闭
-                    else:
-                        # 只有当循环不在运行时才关闭
-                        try:
-                            loop.close()
-                        except:
-                            pass
+                    # 关闭事件循环
+                    try:
+                        loop.close()
+                    except Exception as e:
+                        logger.warning(f"关闭事件循环时出现警告: {e}")
             else:
                 # 兼容旧的接口
                 logger.info("使用兼容模式生成图像")
@@ -188,42 +179,26 @@ class ImageGenerationThread(QThread):
                 import asyncio
                 import concurrent.futures
 
-                # 在新线程中运行异步代码，避免事件循环冲突
-                def run_async_generation():
-                    """在新线程中运行异步图像生成"""
+                # 创建新的事件循环，避免与主线程冲突
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    # 确保参数类型正确
+                    prompt = self.prompt if self.prompt else ""
+                    config = config_dict if config_dict else {}
+
+                    # 运行异步生成
+                    result = loop.run_until_complete(service.generate_image(
+                        prompt=prompt,
+                        config=config
+                    ))
+                finally:
+                    # 清理事件循环
                     try:
-                        # 创建新的事件循环
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-
-                        try:
-                            # 确保参数类型正确
-                            prompt = self.prompt if self.prompt else ""
-                            config = config_dict if config_dict else {}
-
-                            # 运行异步生成
-                            return loop.run_until_complete(service.generate_image(
-                                prompt=prompt,
-                                config=config
-                            ))
-                        finally:
-                            # 清理事件循环
-                            loop.close()
+                        loop.close()
                     except Exception as e:
-                        logger.error(f"异步图像生成失败: {e}")
-                        return None
-
-                # 使用线程池执行异步任务
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(run_async_generation)
-                    try:
-                        result = future.result(timeout=300)  # 5分钟超时
-                    except concurrent.futures.TimeoutError:
-                        logger.error("图像生成超时")
-                        result = None
-                    except Exception as e:
-                        logger.error(f"图像生成执行失败: {e}")
-                        result = None
+                        logger.warning(f"关闭事件循环时出现警告: {e}")
             
             # 检查是否已取消
             if self._is_cancelled:

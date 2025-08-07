@@ -162,9 +162,14 @@ class CogVideoXEngine(VideoGenerationEngine):
                     # 参数错误但API可访问，认为连接正常
                     logger.info("API端点可访问（参数测试返回400）")
                     return True
+                elif response.status == 429:
+                    # 请求频率限制，但API可访问，认为连接正常
+                    logger.warning("API请求频率受限(429)，但端点可访问，允许引擎初始化")
+                    return True
                 else:
                     logger.warning(f"API测试返回状态码: {response.status}")
-                    return False
+                    # 对于其他状态码，也允许引擎初始化，避免因为临时问题导致引擎不可用
+                    return True
 
         except Exception as e:
             logger.error(f"CogVideoX-Flash连接测试失败: {e}")
@@ -608,27 +613,42 @@ class CogVideoXEngine(VideoGenerationEngine):
         # 记录关键参数（调试用）
         logger.debug(f"发送给CogVideoX API的参数: {request_data}")
 
-        try:
-            # 创建提交任务的timeout
-            timeout = aiohttp.ClientTimeout(total=60)  # 60秒超时
-            async with self.session.post(url, json=request_data, timeout=timeout) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"API请求失败 (状态码: {response.status}): {error_text}")
+        # 添加重试机制处理429错误
+        max_retries = 3
+        base_delay = 5  # 基础延迟5秒
+        
+        for attempt in range(max_retries):
+            try:
+                # 创建提交任务的timeout
+                timeout = aiohttp.ClientTimeout(total=60)  # 60秒超时
+                async with self.session.post(url, json=request_data, timeout=timeout) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if 'id' not in result:
+                            raise Exception(f"API响应格式错误: {result}")
+                        return result['id']
+                    elif response.status == 429:
+                        # 请求频率限制，需要等待后重试
+                        if attempt < max_retries - 1:
+                            delay = base_delay * (2 ** attempt)  # 指数退避
+                            logger.warning(f"API请求频率受限(429)，等待{delay}秒后重试... (尝试 {attempt + 1}/{max_retries})")
+                            await asyncio.sleep(delay)
+                            continue
+                        else:
+                            error_text = await response.text()
+                            raise Exception(f"API请求频率受限，已重试{max_retries}次仍失败: {error_text}")
+                    else:
+                        error_text = await response.text()
+                        raise Exception(f"API请求失败 (状态码: {response.status}): {error_text}")
 
-                result = await response.json()
-
-                if 'id' not in result:
-                    raise Exception(f"API响应格式错误: {result}")
-
-                return result['id']
-
-        except asyncio.CancelledError:
-            logger.warning("提交生成任务被取消")
-            raise
-        except Exception as e:
-            logger.error(f"提交生成任务失败: {e}")
-            raise
+            except asyncio.CancelledError:
+                logger.warning("提交生成任务被取消")
+                raise
+            except Exception as e:
+                if "API请求频率受限" in str(e):
+                    raise  # 重新抛出频率限制错误
+                logger.error(f"提交生成任务失败: {e}")
+                raise
 
     async def _poll_task_status(self, task_id: str, progress_callback: Optional[Callable] = None) -> str:
         """轮询任务状态"""

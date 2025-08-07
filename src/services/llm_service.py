@@ -426,32 +426,69 @@ class LLMService(ServiceBase):
     
 
 
-    async def rewrite_text(self, text: str, provider: Optional[str] = None) -> ServiceResult:
-        """改写文本"""
-        logger.info(f"✏️ LLM服务：开始文本改写")
-        logger.info(f"  📝 原文长度: {len(text)} 字符")
-        logger.info(f"  📄 原文预览: {text[:50]}...")
-        logger.info(f"  🤖 提供商: {provider or '默认'}")
+    async def rewrite_text(self, text: str, language: Optional[str] = None, provider: Optional[str] = None) -> ServiceResult:
+        """
+        改写文本（支持语言参数）
+        
+        Args:
+            text: 要改写的文本
+            language: 语言代码 ('zh-CN' 或 'en-US')，如果为None则使用默认中文
+            provider: LLM提供商
+            
+        Returns:
+            ServiceResult: 服务执行结果
+        """
+        try:
+            logger.info(f"✏️ LLM服务：开始文本改写")
+            logger.info(f"  📝 原文长度: {len(text)} 字符")
+            logger.info(f"  📄 原文预览: {text[:50]}...")
+            logger.info(f"  🌐 语言: {language or 'zh-CN'}")
+            logger.info(f"  🤖 提供商: {provider or '默认'}")
 
-        prompt = self.prompt_templates['text_rewrite'].format(text=text)
+            # 如果指定了语言，尝试使用双语服务
+            if language and language != 'zh-CN':
+                try:
+                    from src.services.bilingual_llm_service import BilingualLLMService
+                    from src.models.language_models import LanguageCode
+                    
+                    # 创建双语服务实例
+                    bilingual_service = BilingualLLMService(self.api_manager)
+                    
+                    # 转换语言代码
+                    target_language = LanguageCode.ENGLISH if language == 'en-US' else LanguageCode.CHINESE
+                    
+                    logger.info(f"✏️ 使用双语LLM服务改写文本，语言: {language}")
+                    return await bilingual_service.rewrite_text_bilingual(text, target_language, provider)
+                    
+                except ImportError as e:
+                    logger.warning(f"双语服务不可用，使用默认中文服务: {e}")
+                except Exception as e:
+                    logger.warning(f"双语服务调用失败，使用默认中文服务: {e}")
 
-        logger.info(f"  📝 提示词长度: {len(prompt)} 字符")
-        logger.info(f"  ⚙️ 参数设置: max_tokens=1500, temperature=0.8")
+            # 使用默认的中文文本改写
+            prompt = self.prompt_templates['text_rewrite'].format(text=text)
 
-        result = await self.execute(
-            provider=provider,
-            prompt=prompt,
-            max_tokens=1500,
-            temperature=0.8
-        )
+            logger.info(f"  📝 提示词长度: {len(prompt)} 字符")
+            logger.info(f"  ⚙️ 参数设置: max_tokens=1500, temperature=0.8")
 
-        if result.success:
-            content_length = len(result.data.get('content', ''))
-            logger.info(f"  ✅ 文本改写完成，内容长度: {content_length} 字符")
-        else:
-            logger.error(f"  ❌ 文本改写失败: {result.error}")
+            result = await self.execute(
+                provider=provider,
+                prompt=prompt,
+                max_tokens=1500,
+                temperature=0.8
+            )
 
-        return result
+            if result.success:
+                content_length = len(result.data.get('content', ''))
+                logger.info(f"  ✅ 文本改写完成，内容长度: {content_length} 字符")
+            else:
+                logger.error(f"  ❌ 文本改写失败: {result.error}")
+
+            return result
+            
+        except Exception as e:
+            logger.error(f"文本改写失败: {e}")
+            return ServiceResult(success=False, error=str(e))
 
     async def create_story_from_theme(self, theme: str, provider: Optional[str] = None) -> ServiceResult:
         """根据主题创作故事"""
@@ -478,6 +515,47 @@ class LLMService(ServiceBase):
             logger.error(f"  ❌ 故事创作失败: {result.error}")
 
         return result
+
+    async def story_creation(self, theme: str, language: Optional[str] = None, provider: Optional[str] = None) -> ServiceResult:
+        """
+        故事创作方法（支持语言参数）
+        
+        Args:
+            theme: 故事主题
+            language: 语言代码 ('zh-CN' 或 'en-US')，如果为None则使用默认中文
+            provider: LLM提供商
+            
+        Returns:
+            ServiceResult: 服务执行结果
+        """
+        try:
+            # 如果指定了语言，尝试使用双语服务
+            if language and language != 'zh-CN':
+                # 导入双语服务（延迟导入避免循环依赖）
+                try:
+                    from src.services.bilingual_llm_service import BilingualLLMService
+                    from src.models.language_models import LanguageCode
+                    
+                    # 创建双语服务实例
+                    bilingual_service = BilingualLLMService(self.api_manager)
+                    
+                    # 转换语言代码
+                    target_language = LanguageCode.ENGLISH if language == 'en-US' else LanguageCode.CHINESE
+                    
+                    logger.info(f"📚 使用双语LLM服务创作故事，语言: {language}")
+                    return await bilingual_service.create_story_bilingual(theme, target_language, provider)
+                    
+                except ImportError as e:
+                    logger.warning(f"双语服务不可用，使用默认中文服务: {e}")
+                except Exception as e:
+                    logger.warning(f"双语服务调用失败，使用默认中文服务: {e}")
+            
+            # 使用默认的中文故事创作
+            return await self.create_story_from_theme(theme, provider)
+            
+        except Exception as e:
+            logger.error(f"故事创作失败: {e}")
+            return ServiceResult(success=False, error=str(e))
 
     async def optimize_prompt(self, prompt: str, style: str = "写实风格", provider: Optional[str] = None) -> ServiceResult:
         """优化绘画提示词"""

@@ -85,6 +85,10 @@ class StoryboardImageGenerationTab(QWidget):
         self.auto_save_timer.timeout.connect(self.auto_save_settings)
         self.auto_save_delay = 2000  # 2秒延迟
 
+        # 初始化设置持久化管理器
+        from src.utils.settings_persistence import SettingsPersistence
+        self.settings_persistence = SettingsPersistence(self.project_manager)
+        
         # 延迟加载项目设置，确保UI完全初始化后再加载
         QTimer.singleShot(100, self.load_all_settings_from_project)
 
@@ -95,41 +99,22 @@ class StoryboardImageGenerationTab(QWidget):
     def load_all_settings_from_project(self):
         """从项目设置中加载所有设置"""
         try:
-            if not self.project_manager or not self.project_manager.current_project:
-                logger.info("无项目，使用默认设置")
-                self.load_default_settings()
-                return
-
-            project_data = self.project_manager.current_project
-
-            # 兼容不同的项目数据结构
-            if hasattr(project_data, 'data'):
-                data = project_data.data
+            # 更新设置持久化管理器的项目管理器引用
+            self.settings_persistence.set_project_manager(self.project_manager)
+            
+            # 使用设置持久化管理器加载设置
+            settings = self.settings_persistence.load_ui_settings(
+                'image_generation', 
+                prefer_project=True
+            )
+            
+            if settings:
+                # 加载所有设置
+                self.load_settings_from_dict(settings)
+                logger.info("从项目设置加载所有图像生成设置")
             else:
-                data = project_data.get("data", {})
-
-            # 优先使用新的数据结构
-            image_settings = data.get("image_generation", {}).get("settings", {})
-
-            # 如果新结构不存在，尝试从旧结构加载
-            if not image_settings:
-                logger.info("新数据结构不存在，尝试从旧结构加载设置")
-                old_settings = project_data.get("image_generation_settings", {})
-                if old_settings:
-                    # 转换旧设置到新格式
-                    image_settings = self.migrate_old_settings(old_settings)
-                    # 保存到新结构
-                    self.save_migrated_settings(image_settings)
-                    logger.info("已迁移旧设置到新数据结构")
-
-            if not image_settings:
-                logger.info("项目中无图像生成设置，使用默认设置")
+                logger.info("无可用设置，使用默认设置")
                 self.load_default_settings()
-                return
-
-            # 加载所有设置
-            self.load_settings_from_dict(image_settings)
-            logger.info("从项目设置加载所有图像生成设置")
 
         except Exception as e:
             logger.error(f"加载项目设置失败: {e}")
@@ -321,27 +306,9 @@ class StoryboardImageGenerationTab(QWidget):
     def save_all_settings_to_project(self):
         """保存所有设置到项目"""
         try:
-            if not self.project_manager or not self.project_manager.current_project:
-                return
-
-            project_data = self.project_manager.current_project
-
-            # 兼容不同的项目数据结构
-            if hasattr(project_data, 'data'):
-                data = project_data.data
-            else:
-                if "data" not in project_data:
-                    project_data["data"] = {}
-                data = project_data["data"]
-
-            # 确保图像生成设置结构存在
-            if "image_generation" not in data:
-                data["image_generation"] = {"images": [], "settings": {}}
-            if "settings" not in data["image_generation"]:
-                data["image_generation"]["settings"] = {}
-
-            settings = data["image_generation"]["settings"]
-
+            # 收集所有UI设置
+            settings = {}
+            
             # 保存所有图像生成设置
             if hasattr(self, 'style_combo'):
                 settings["style"] = self.style_combo.currentText()
@@ -384,10 +351,22 @@ class StoryboardImageGenerationTab(QWidget):
                 settings["enhance"] = self.pollinations_enhance_check.isChecked()
             if hasattr(self, 'pollinations_logo_check'):
                 settings["logo"] = self.pollinations_logo_check.isChecked()
-
-            # 标记项目已修改
-            if hasattr(self.project_manager, 'mark_project_modified'):
-                self.project_manager.mark_project_modified()
+            
+            # 使用设置持久化管理器保存
+            success = self.settings_persistence.save_ui_settings(
+                'image_generation', 
+                settings, 
+                save_to_project=True, 
+                save_globally=True
+            )
+            
+            if success:
+                logger.info("所有图像生成设置已保存")
+                # 标记项目已修改
+                if hasattr(self.project_manager, 'mark_project_modified'):
+                    self.project_manager.mark_project_modified()
+            else:
+                logger.error("保存设置失败")
 
             logger.info("所有图像生成设置已保存到项目")
         except Exception as e:
@@ -1225,7 +1204,9 @@ class StoryboardImageGenerationTab(QWidget):
         
         # Pollinations特有设置（默认显示）
         self.pollinations_model_combo = QComboBox()
-        self.pollinations_model_combo.addItems(["flux", "flux-turbo", "gptimage"])
+        self.pollinations_model_combo.addItems([
+            "flux", "turbo", "flux-realism"
+        ])
         self.pollinations_model_combo.setCurrentText("flux")
         self.pollinations_model_combo.currentTextChanged.connect(self.on_parameter_changed)
         engine_layout.addRow("模型:", self.pollinations_model_combo)
@@ -1317,12 +1298,14 @@ class StoryboardImageGenerationTab(QWidget):
         self.steps_spin = QSpinBox()
         self.steps_spin.setRange(10, 100)
         self.steps_spin.setValue(30)
+        self.steps_spin.valueChanged.connect(self.on_parameter_changed)
         self.steps_label = QLabel("生成步数:")
         
         self.cfg_spin = QDoubleSpinBox()
         self.cfg_spin.setRange(1.0, 20.0)
         self.cfg_spin.setValue(7.5)
         self.cfg_spin.setSingleStep(0.5)
+        self.cfg_spin.valueChanged.connect(self.on_parameter_changed)
         self.cfg_label = QLabel("CFG Scale:")
         
         self.sampler_combo = QComboBox()
@@ -1330,6 +1313,7 @@ class StoryboardImageGenerationTab(QWidget):
             "DPM++ 2M Karras", "Euler a", "Euler", "LMS", 
             "Heun", "DPM2", "DPM2 a", "DPM++ SDE", "DPM++ 2M SDE"
         ])
+        self.sampler_combo.currentTextChanged.connect(self.on_parameter_changed)
         self.sampler_label = QLabel("采样器:")
         
         self.negative_prompt_text = QTextEdit()
@@ -1339,6 +1323,7 @@ class StoryboardImageGenerationTab(QWidget):
             "bad proportions, extra limbs, cloned face, disfigured, "
             "gross proportions, malformed limbs, missing arms, missing legs"
         )
+        self.negative_prompt_text.textChanged.connect(self.on_parameter_changed)
         self.negative_prompt_label = QLabel("负面描述:")
         
         # 添加到布局（默认隐藏）
@@ -1363,15 +1348,24 @@ class StoryboardImageGenerationTab(QWidget):
         batch_group = QGroupBox("并发设置")
         batch_layout = QFormLayout(batch_group)
         
+        # 批量大小
+        self.batch_size_spin = QSpinBox()
+        self.batch_size_spin.setRange(1, 10)
+        self.batch_size_spin.setValue(1)
+        self.batch_size_spin.valueChanged.connect(self.on_parameter_changed)
+        batch_layout.addRow("批量大小:", self.batch_size_spin)
+
         self.retry_count_spin = QSpinBox()
         self.retry_count_spin.setRange(0, 5)
         self.retry_count_spin.setValue(2)
+        self.retry_count_spin.valueChanged.connect(self.on_parameter_changed)
         batch_layout.addRow("重试次数:", self.retry_count_spin)
 
         # 并发任务数
         self.concurrent_tasks_spin = QSpinBox()
         self.concurrent_tasks_spin.setRange(1, 10)
         self.concurrent_tasks_spin.setValue(3)
+        self.concurrent_tasks_spin.valueChanged.connect(self.on_parameter_changed)
         batch_layout.addRow("并发任务数:", self.concurrent_tasks_spin)
 
         self.delay_spin = QDoubleSpinBox()
@@ -1379,6 +1373,7 @@ class StoryboardImageGenerationTab(QWidget):
         self.delay_spin.setValue(1.0)
         self.delay_spin.setSingleStep(0.1)
         self.delay_spin.setSuffix(" 秒")
+        self.delay_spin.valueChanged.connect(self.on_parameter_changed)
         batch_layout.addRow("生成间隔:", self.delay_spin)
         
         scroll_layout.addRow(batch_group)
@@ -2895,10 +2890,10 @@ class StoryboardImageGenerationTab(QWidget):
 
                 # 根据引擎类型决定是否翻译
                 current_engine = self.engine_combo.currentText()
-                if "CogView-3 Flash" in current_engine:
-                    # CogView-3 Flash支持中文，直接使用原始描述
+                if "CogView-3 Flash" in current_engine or "Pollinations" in current_engine:
+                    # CogView-3 Flash和Pollinations引擎支持中文，直接使用原始描述
                     translated_prompt = original_prompt
-                    logger.info("CogView-3 Flash引擎支持中文，跳过翻译")
+                    logger.info(f"{current_engine}引擎支持中文，跳过翻译")
                 else:
                     # 其他引擎需要翻译为英文
                     translated_prompt = self._translate_prompt_to_english(original_prompt, item)
@@ -2961,25 +2956,62 @@ class StoryboardImageGenerationTab(QWidget):
                         self.image_generation_service.engine_manager.concurrent_limit = concurrent_limit
                         logger.info(f"设置并发任务数限制: {concurrent_limit}")
 
-                # 启动异步生成任务
-                from src.gui.image_generation_thread import ImageGenerationThread
+                # 启动简化的生成任务
+                from src.gui.simple_image_generation_thread import SimpleImageGenerationThread
+                
+                # 获取图像服务
+                from src.core.service_manager import ServiceType
+                image_service = None
+                if hasattr(self, 'app_controller') and self.app_controller:
+                    if hasattr(self.app_controller, 'service_manager'):
+                        image_service = self.app_controller.service_manager.get_service(ServiceType.IMAGE)
+                
+                if not image_service:
+                    logger.error("无法获取图像服务")
+                    self.on_image_generated(item, False)
+                    return
+                
+                # 准备配置
+                simple_config = {
+                    'provider': provider,
+                    'width': config.get('width', 1024),
+                    'height': config.get('height', 1024),
+                    'negative_prompt': config.get('negative_prompt', '')
+                }
 
-                self.image_generation_thread = ImageGenerationThread(
-                    image_generation_service=self.image_generation_service,
-                    config=generation_config,  # 使用正确的配置对象
-                    engine_preference=engine_preference,  # 使用用户选择的引擎偏好
+                # 如果已有线程在运行，先停止它
+                if hasattr(self, 'image_generation_thread') and self.image_generation_thread:
+                    if self.image_generation_thread.isRunning():
+                        self.image_generation_thread.cancel()
+                        self.image_generation_thread.wait(3000)  # 等待最多3秒
+                    # 不立即删除，让Qt的垃圾回收处理
+                    self.image_generation_thread = None
+                
+                self.image_generation_thread = SimpleImageGenerationThread(
+                    image_service=image_service,
                     prompt=translated_prompt,  # 使用翻译后的提示词
-                    workflow_id=item['sequence'],  # 使用序列作为工作流ID
-                    project_manager=self.project_manager,
-                    current_project_name=self.project_manager.current_project['project_name'] if self.project_manager and self.project_manager.current_project else None
+                    config=simple_config
                 )
 
-                # 连接信号 - 修复lambda参数问题
+                # 连接信号
                 self.image_generation_thread.image_generated.connect(
-                    lambda image_path: self.on_async_image_generated(item, True, image_path, None)
+                    lambda image_path, item=item: self.on_image_generation_success(item, image_path)
                 )
                 self.image_generation_thread.generation_failed.connect(
-                    lambda error_msg: self.on_async_image_generated(item, False, None, error_msg)
+                    lambda error_msg, item=item: self.on_image_generation_failed(item, error_msg)
+                )
+                self.image_generation_thread.progress_updated.connect(
+                    lambda msg: logger.info(f"生成进度: {msg}")
+                )
+                
+                # 线程完成后延迟清理，避免信号回调时对象已被删除
+                def cleanup_thread():
+                    if hasattr(self, 'image_generation_thread') and self.image_generation_thread:
+                        self.image_generation_thread.deleteLater()
+                        self.image_generation_thread = None
+                
+                self.image_generation_thread.finished.connect(
+                    lambda: QTimer.singleShot(1000, cleanup_thread)  # 延迟1秒清理
                 )
 
                 # 启动线程
@@ -3365,8 +3397,29 @@ class StoryboardImageGenerationTab(QWidget):
 
         self.update_item_status(item)
 
-        # 继续处理下一个
-        QTimer.singleShot(int(self.delay_spin.value() * 1000), self.process_generation_queue)
+        # 继续处理下一个，添加适当延迟避免API限制
+        delay_ms = max(int(self.delay_spin.value() * 1000), 2000)  # 最少2秒延迟
+        QTimer.singleShot(delay_ms, self.process_generation_queue)
+    
+    def on_image_generation_success(self, item, image_path):
+        """图像生成成功回调"""
+        try:
+            logger.info(f"图像生成成功: {image_path}")
+            item['image_path'] = image_path
+            item['main_image_path'] = image_path
+            self.on_image_generated(item, True)
+        except Exception as e:
+            logger.error(f"处理图像生成成功回调失败: {e}")
+            self.on_image_generated(item, False, str(e))
+    
+    def on_image_generation_failed(self, item, error_message):
+        """图像生成失败回调"""
+        try:
+            logger.error(f"图像生成失败: {error_message}")
+            self.on_image_generated(item, False, error_message)
+        except Exception as e:
+            logger.error(f"处理图像生成失败回调失败: {e}")
+            self.on_image_generated(item, False, str(e))
         
     def update_item_status(self, item):
         """更新项目状态显示"""
@@ -3433,6 +3486,18 @@ class StoryboardImageGenerationTab(QWidget):
     def stop_generation(self):
         """停止生成"""
         self.is_generating = False
+        
+        # 停止当前运行的线程
+        if hasattr(self, 'image_generation_thread') and self.image_generation_thread:
+            if self.image_generation_thread.isRunning():
+                logger.info("正在停止图像生成线程...")
+                self.image_generation_thread.cancel()
+                self.image_generation_thread.wait(3000)  # 等待最多3秒
+                logger.info("图像生成线程已停止")
+        
+        # 清空生成队列
+        self.generation_queue = []
+        
         self.finish_batch_generation()
         
     def finish_batch_generation(self):
@@ -4463,82 +4528,7 @@ class StoryboardImageGenerationTab(QWidget):
             self.enhanced_desc_text.setPlainText(consistency_desc)
             
     # 参数管理方法
-    def on_parameter_changed(self):
-        """参数改变时同步到AI绘图设置界面并触发自动保存"""
-        try:
-            # 同步到AI绘图设置界面
-            self.sync_to_ai_drawing_settings()
 
-            # 触发自动保存
-            if hasattr(self, 'auto_save_timer'):
-                self.auto_save_timer.stop()
-                self.auto_save_timer.start(self.auto_save_delay)
-        except Exception as e:
-            logger.error(f"参数同步失败: {e}")
-
-    def sync_to_ai_drawing_settings(self):
-        """同步参数到AI绘图设置界面"""
-        try:
-            # 查找AI绘图设置界面
-            ai_drawing_widget = self.find_ai_drawing_widget()
-            if not ai_drawing_widget:
-                return
-
-            # 同步基础参数
-            if hasattr(ai_drawing_widget, 'width_spin'):
-                ai_drawing_widget.width_spin.setValue(self.width_spin.value())
-            if hasattr(ai_drawing_widget, 'height_spin'):
-                ai_drawing_widget.height_spin.setValue(self.height_spin.value())
-            if hasattr(ai_drawing_widget, 'seed_combo'):
-                ai_drawing_widget.seed_combo.setCurrentText(self.seed_combo.currentText())
-
-            # 同步Pollinations特有参数
-            if hasattr(ai_drawing_widget, 'pollinations_model_combo') and hasattr(self, 'pollinations_model_combo'):
-                ai_drawing_widget.pollinations_model_combo.setCurrentText(self.pollinations_model_combo.currentText())
-            if hasattr(ai_drawing_widget, 'pollinations_enhance_check') and hasattr(self, 'pollinations_enhance_check'):
-                ai_drawing_widget.pollinations_enhance_check.setChecked(self.pollinations_enhance_check.isChecked())
-            if hasattr(ai_drawing_widget, 'pollinations_logo_check') and hasattr(self, 'pollinations_logo_check'):
-                ai_drawing_widget.pollinations_logo_check.setChecked(self.pollinations_logo_check.isChecked())
-
-            logger.info("参数已同步到AI绘图设置界面")
-
-        except Exception as e:
-            logger.error(f"同步参数到AI绘图设置界面失败: {e}")
-
-    def find_ai_drawing_widget(self):
-        """查找AI绘图设置界面"""
-        try:
-            # 向上查找主窗口
-            widget = self
-            while widget.parent():
-                widget = widget.parent()
-                if hasattr(widget, 'tab_widget'):
-                    main_window = widget
-                    break
-            else:
-                return None
-
-            # 查找设置标签页
-            tab_widget = main_window.tab_widget
-            for i in range(tab_widget.count()):
-                tab_text = tab_widget.tabText(i)
-                if "设置" in tab_text:
-                    settings_tab = tab_widget.widget(i)
-                    # 在设置标签页中查找AI绘图子标签页
-                    if hasattr(settings_tab, 'tab_widget'):
-                        settings_tab_widget = settings_tab.tab_widget
-                        for j in range(settings_tab_widget.count()):
-                            sub_tab_text = settings_tab_widget.tabText(j)
-                            if "AI绘图" in sub_tab_text:
-                                ai_drawing_tab = settings_tab_widget.widget(j)
-                                # 查找AI绘图设置组件
-                                if hasattr(ai_drawing_tab, 'ai_drawing_widget'):
-                                    return ai_drawing_tab.ai_drawing_widget
-            return None
-
-        except Exception as e:
-            logger.error(f"查找AI绘图设置界面失败: {e}")
-            return None
             
     def get_seed_value(self):
         """根据种子模式获取种子值"""
@@ -4661,8 +4651,10 @@ class StoryboardImageGenerationTab(QWidget):
                 'height': self.height_spin.value(),
                 'seed_mode': self.seed_combo.currentText(),
                 'seed_value': self.get_seed_value(),
+                'batch_size': self.batch_size_spin.value(),
                 'retry_count': self.retry_count_spin.value(),
-                'delay': self.delay_spin.value()
+                'delay': self.delay_spin.value(),
+                'concurrent_tasks': self.concurrent_tasks_spin.value()
             }
 
             # 添加引擎特定参数
@@ -4729,8 +4721,10 @@ class StoryboardImageGenerationTab(QWidget):
                     self.height_spin.setValue(settings.get('height', 1024))
                     self.seed_combo.setCurrentText(settings.get('seed_mode', '随机'))
                     # 种子值现在通过下拉框控制，不需要设置具体数值
+                    self.batch_size_spin.setValue(settings.get('batch_size', 1))
                     self.retry_count_spin.setValue(settings.get('retry_count', 2))
                     self.delay_spin.setValue(settings.get('delay', 1.0))
+                    self.concurrent_tasks_spin.setValue(settings.get('concurrent_tasks', 3))
                     
                     # 触发引擎切换事件
                     self.on_engine_changed(self.engine_combo.currentText())
@@ -4761,6 +4755,21 @@ class StoryboardImageGenerationTab(QWidget):
         self.batch_size_spin.setValue(1)
         self.retry_count_spin.setValue(2)
         self.delay_spin.setValue(1.0)
+        self.concurrent_tasks_spin.setValue(3)
+        
+        # 重置高级参数
+        if hasattr(self, 'steps_spin'):
+            self.steps_spin.setValue(30)
+        if hasattr(self, 'cfg_spin'):
+            self.cfg_spin.setValue(7.5)
+        if hasattr(self, 'sampler_combo'):
+            self.sampler_combo.setCurrentIndex(0)
+        if hasattr(self, 'negative_prompt_text'):
+            self.negative_prompt_text.setPlainText(
+                "blurry, low quality, distorted, deformed, bad anatomy, "
+                "bad proportions, extra limbs, cloned face, disfigured, "
+                "gross proportions, malformed limbs, missing arms, missing legs"
+            )
         
     # 数据管理方法
     def export_configuration(self):
@@ -4811,16 +4820,19 @@ class StoryboardImageGenerationTab(QWidget):
     def get_current_parameters(self):
         """获取当前参数"""
         params = {
+            'engine': self.engine_combo.currentText(),
             'width': self.width_spin.value(),
             'height': self.height_spin.value(),
             'steps': self.steps_spin.value(),
             'cfg_scale': self.cfg_spin.value(),
             'seed': self.get_seed_value(),
+            'seed_mode': self.seed_combo.currentText(),
             'sampler': self.sampler_combo.currentText(),
             'negative_prompt': self.negative_prompt_text.toPlainText(),
             'batch_size': self.batch_size_spin.value(),
             'retry_count': self.retry_count_spin.value(),
-            'delay': self.delay_spin.value()
+            'delay': self.delay_spin.value(),
+            'concurrent_tasks': self.concurrent_tasks_spin.value()
         }
 
         # 添加Pollinations特有参数

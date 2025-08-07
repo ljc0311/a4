@@ -1,0 +1,90 @@
+{
+  "voices": [
+    {
+      "id": "zh-CN-XiaoxiaoNeural",
+      "name": "Microsoft Xiaoxiao Online (Natural) - Chinese (Mainland)",
+      "language": "zh-CN",
+      "gender": "female",
+      "locale": "zh-CN"
+    },
+    {
+      "id": "zh-CN-XiaoyiNeural",
+      "name": "Microsoft Xiaoyi Online (Natural) - Chinese (Mainland)",
+      "language": "zh-CN",
+      "gender": "female",
+      "locale": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunjianNeural",
+      "name": "Microsoft Yunjian Online (Natural) - Chinese (Mainland)",
+      "language": "zh-CN",
+      "gender": "male",
+      "locale": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunxiNeural",
+      "name": "Microsoft Yunxi Online (Natural) - Chinese (Mainland)",
+      "language": "zh-CN",
+      "gender": "male",
+      "locale": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunxiaNeural",
+      "name": "Microsoft Yunxia Online (Natural) - Chinese (Mainland)",
+      "language": "zh-CN",
+      "gender": "male",
+      "locale": "zh-CN"
+    },
+    {
+      "id": "zh-CN-YunyangNeural",
+      "name": "Microsoft Yunyang Online (Natural) - Chinese (Mainland)",
+      "language": "zh-CN",
+      "gender": "male",
+      "locale": "zh-CN"
+    },
+    {
+      "id": "en-US-AvaNeural",
+      "name": "Microsoft Ava Online (Natural) - English (United States)",
+      "language": "en-US",
+      "gender": "female",
+      "locale": "en-US"
+    },
+    {
+      "id": "en-US-AndrewNeural",
+      "name": "Microsoft Andrew Online (Natural) - English (United States)",
+      "language": "en-US",
+      "gender": "male",
+      "locale": "en-US"
+    },
+    {
+      "id": "en-US-EmmaNeural",
+      "name": "Microsoft Emma Online (Natural) - English (United States)",
+      "language": "en-US",
+      "gender": "female",
+      "locale": "en-US"
+    },
+    {
+      "id": "en-US-BrianNeural",
+      "name": "Microsoft Brian Online (Natural) - English (United States)",
+      "language": "en-US",
+      "gender": "male",
+      "locale": "en-US"
+    },
+    {
+      "id": "en-US-AnaNeural",
+      "name": "Microsoft Ana Online (Natural) - English (United States)",
+      "language": "en-US",
+      "gender": "female",
+      "locale": "en-US"
+    },
+    {
+      "id": "en-US-AndrewMultilingualNeural",
+      "name": "Microsoft AndrewMultilingual Online (Natural) - English (United States)",
+      "language": "en-US",
+      "gender": "male",
+      "locale": "en-US"
+    }
+  ],
+  "updated_at": 279338.468,
+  "total_count": 12
+}

@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+项目管理器
+负责项目数据管理和文件操作
+"""
+
 import json
 import os
 import shutil
@@ -7,6 +14,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from src.utils.logger import logger
 from src.utils.character_scene_manager import CharacterSceneManager
+from src.models.language_models import ProjectLanguageSettings, LanguageCode
+
 
 class StoryboardProjectManager:
     """分镜项目管理器 - 负责分镜数据管理和图片处理"""
@@ -39,6 +48,14 @@ class StoryboardProjectManager:
             
             # 创建项目文件夹结构
             project_root = self.create_project_structure(clean_name)
+            
+            # 创建默认项目语言设置
+            default_language_settings = ProjectLanguageSettings(
+                primary_language=LanguageCode.CHINESE,
+                content_language=LanguageCode.CHINESE,
+                voice_language=LanguageCode.CHINESE,
+                subtitle_language=LanguageCode.CHINESE
+            )
             
             # 创建项目配置
             current_time = datetime.now().isoformat()
@@ -74,7 +91,8 @@ class StoryboardProjectManager:
                 'files': {},
                 'original_text': '',
                 'rewritten_text': '',
-                'shots_data': []
+                'shots_data': [],
+                'language_settings': default_language_settings.to_dict()  # 添加语言设置
             }
             
             # 保存项目配置文件
@@ -145,7 +163,7 @@ class StoryboardProjectManager:
         return os.path.join(self.get_project_path(project_name), 'project.json')
         
     def save_project(self, project_name: str, project_data: Dict[str, Any]) -> bool:
-        """保存项目状态 - 统一保存所有数据到project.json
+        """保存项目状态 - 统接从project.json加载所有数据
 
         Args:
             project_name: 项目名称
@@ -163,6 +181,7 @@ class StoryboardProjectManager:
                 - image_generation: 图像生成数据
                 - image_generation_settings: 图像生成设置
                 - shot_image_mappings: 镜头图片关联信息
+                - language_settings: 项目语言设置
 
         Returns:
             bool: 保存是否成功
@@ -180,6 +199,16 @@ class StoryboardProjectManager:
             # 确保项目路径信息正确
             project_data['project_root'] = project_root
             project_data['project_dir'] = project_root
+
+            # 确保语言设置存在
+            if 'language_settings' not in project_data:
+                default_language_settings = ProjectLanguageSettings(
+                    primary_language=LanguageCode.CHINESE,
+                    content_language=LanguageCode.CHINESE,
+                    voice_language=LanguageCode.CHINESE,
+                    subtitle_language=LanguageCode.CHINESE
+                )
+                project_data['language_settings'] = default_language_settings.to_dict()
 
             # 统一保存所有数据到project.json文件
             config_file = os.path.join(project_root, 'project.json')
@@ -265,6 +294,15 @@ class StoryboardProjectManager:
                 project_data['progress_status'] = {}
             if 'files' not in project_data:
                 project_data['files'] = {}
+            if 'language_settings' not in project_data:
+                # 如果没有语言设置，创建默认设置
+                default_language_settings = ProjectLanguageSettings(
+                    primary_language=LanguageCode.CHINESE,
+                    content_language=LanguageCode.CHINESE,
+                    voice_language=LanguageCode.CHINESE,
+                    subtitle_language=LanguageCode.CHINESE
+                )
+                project_data['language_settings'] = default_language_settings.to_dict()
 
             # 初始化角色场景管理器（暂时不传入service_manager，因为这里没有可用的实例）
             character_scene_manager = CharacterSceneManager(project_root)
@@ -1095,3 +1133,4 @@ class StoryboardProjectManager:
         except Exception as e:
             logger.error(f"更新视频生成数据失败: {e}")
             return False
+

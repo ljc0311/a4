@@ -1,11 +1,12 @@
 import sys
 import os
 import json
+from datetime import datetime
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QLabel, QPushButton,
     QPlainTextEdit, QComboBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QScrollArea, QGridLayout, QFrame, QSpacerItem,
-    QSizePolicy, QMessageBox, QDialog
+    QSizePolicy, QMessageBox, QDialog, QTextEdit
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
@@ -19,6 +20,64 @@ from src.gui.shots_window import ShotsWindow
 from src.gui.ui_components import ImageDelegate
 from src.gui.project_name_dialog import ProjectNameDialog
 from src.utils.project_manager import StoryboardProjectManager
+from src.models.language_models import LanguageCode
+from src.core.language_manager import LanguageManager
+from src.gui.language_switch_dialog import LanguageSwitchDialog
+
+# 添加双语文本展示对话框
+class BilingualTextDialog(QDialog):
+    """双语文本展示对话框"""
+    
+    def __init__(self, chinese_text: str, english_text: str, title: str = "双语文本对照", parent=None):
+        super().__init__(parent)
+        self.chinese_text = chinese_text
+        self.english_text = english_text
+        self.setWindowTitle(title)
+        self.resize(800, 600)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        
+        # 创建分栏显示
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # 中文内容
+        chinese_widget = QWidget()
+        chinese_layout = QVBoxLayout()
+        chinese_label = QLabel("中文内容")
+        chinese_label.setAlignment(Qt.AlignCenter)
+        chinese_layout.addWidget(chinese_label)
+        self.chinese_text_edit = QTextEdit()
+        self.chinese_text_edit.setPlainText(self.chinese_text)
+        self.chinese_text_edit.setReadOnly(True)
+        chinese_layout.addWidget(self.chinese_text_edit)
+        chinese_widget.setLayout(chinese_layout)
+        
+        # 英文内容
+        english_widget = QWidget()
+        english_layout = QVBoxLayout()
+        english_label = QLabel("English Content")
+        english_label.setAlignment(Qt.AlignCenter)
+        english_layout.addWidget(english_label)
+        self.english_text_edit = QTextEdit()
+        self.english_text_edit.setPlainText(self.english_text)
+        self.english_text_edit.setReadOnly(True)
+        english_layout.addWidget(self.english_text_edit)
+        english_widget.setLayout(english_layout)
+        
+        splitter.addWidget(chinese_widget)
+        splitter.addWidget(english_widget)
+        splitter.setSizes([400, 400])
+        
+        layout.addWidget(splitter)
+        
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+        
+        self.setLayout(layout)
 
 
 class StoryboardTab(QWidget):
@@ -34,6 +93,9 @@ class StoryboardTab(QWidget):
         self.config_manager = ConfigManager()
         self.project_manager = StoryboardProjectManager(self.config_manager.config_dir)
         
+        # 初始化语言管理器
+        self.language_manager = LanguageManager(self.config_manager)
+        
         # 当前项目信息
         self.current_project_name = None
         self.current_project_root = None
@@ -42,6 +104,10 @@ class StoryboardTab(QWidget):
         self.current_view_state = "default"  # "default" 或 "shots_list"
         self.is_generating = False  # 是否正在生成分镜
         self.stop_generation = False  # 停止生成标志
+        
+        # 语言切换状态管理
+        self.language_switch_in_progress = False
+        self.skip_language_confirmation = False
         
         # 线程相关
         self.rewrite_thread = None
@@ -54,7 +120,14 @@ class StoryboardTab(QWidget):
         self.back_to_edit_btn = None
         self.fullscreen_shots_widget = None
         
+        # 双语内容存储
+        self.chinese_content = ""
+        self.english_content = ""
+        
         self.init_ui()
+        
+        # 注册语言变更回调
+        self.language_manager.add_language_change_callback(self.on_language_manager_changed)
         
         # 连接文本变化信号，自动从主窗口同步已改写的文本
         if self.parent_window:
@@ -94,6 +167,51 @@ class StoryboardTab(QWidget):
         except Exception as e:
             logger.error(f"处理模型选择变化时出错: {e}")
     
+    def on_language_changed(self, index):
+        """语言选择变化时的处理"""
+        try:
+            if self.language_switch_in_progress:
+                return
+                
+            new_language = self.language_combo.itemData(index)
+            current_language = self.language_manager.current_language
+            
+            # 如果语言没有变化，直接返回
+            if new_language == current_language:
+                return
+                
+            logger.debug(f"语言选择变化: {current_language.value} -> {new_language.value}")
+            
+            # 检查是否需要显示确认对话框
+            has_unsaved_content = self._has_unsaved_content()
+            
+            if not self.skip_language_confirmation and (has_unsaved_content or not self._get_skip_confirmation_setting()):
+                # 显示确认对话框
+                confirmed, dont_ask_again = LanguageSwitchDialog.show_confirmation(
+                    current_language, new_language, has_unsaved_content, self
+                )
+                
+                if not confirmed:
+                    # 用户取消，恢复原来的选择
+                    self.language_switch_in_progress = True
+                    self._set_language_combo_value(current_language)
+                    self.language_switch_in_progress = False
+                    return
+                
+                # 保存用户的"不再询问"选择
+                if dont_ask_again:
+                    self._set_skip_confirmation_setting(True)
+            
+            # 执行语言切换
+            self._perform_language_switch(new_language)
+            
+        except Exception as e:
+            logger.error(f"处理语言选择变化时出错: {e}")
+            # 发生错误时恢复原来的选择
+            self.language_switch_in_progress = True
+            self._set_language_combo_value(self.language_manager.current_language)
+            self.language_switch_in_progress = False
+    
     def _auto_save_project(self):
         """自动保存项目状态"""
         if self.current_project_name and self.parent_window:
@@ -125,33 +243,50 @@ class StoryboardTab(QWidget):
         self.text_input.setToolTip("显示第一个标签页改写后的文本内容，或输入自定义文本进行分镜生成")
         left_layout.addWidget(self.text_input)
 
-        # 风格选择和大模型选择布局
-        style_model_layout = QHBoxLayout()
+        # --- 创作配置 ---
+        config_layout = QVBoxLayout()
+        config_layout.setSpacing(10)
+
+        # 第一行：创作风格和AI模型
+        row1_layout = QHBoxLayout()
         
-        # 风格选择下拉框
+        # 创作风格
+        row1_layout.addWidget(QLabel("创作风格:"))
         self.style_combo = QComboBox()
         self.style_combo.addItems([
             "电影风格", "动漫风格", "吉卜力风格", "赛博朋克风格", "水彩插画风格", "像素风格", "写实摄影风格"
         ])
-        # 连接风格选择变化事件
         self.style_combo.currentTextChanged.connect(self.on_style_changed)
-        style_model_layout.addWidget(QLabel("选择风格："))
-        style_model_layout.addWidget(self.style_combo)
         self.style_combo.setToolTip("选择分镜和生图的风格模板")
+        row1_layout.addWidget(self.style_combo)
         
-        # 添加间距
-        style_model_layout.addSpacing(20)
-        
-        # 大模型选择下拉框
+        row1_layout.addSpacing(20)
+
+        # AI模型
+        row1_layout.addWidget(QLabel("AI模型:"))
         self.model_combo = QComboBox()
         self.model_combo.setToolTip("选择用于分镜生成的大模型")
-        # 连接模型选择变化事件，重置API实例
         self.model_combo.currentTextChanged.connect(self.on_model_changed)
-        style_model_layout.addWidget(QLabel("选择大模型："))
-        style_model_layout.addWidget(self.model_combo)
+        row1_layout.addWidget(self.model_combo)
+        row1_layout.addStretch()
         
-        style_model_layout.addStretch()
-        left_layout.addLayout(style_model_layout)
+        config_layout.addLayout(row1_layout)
+
+        # 第二行：内容语言
+        row2_layout = QHBoxLayout()
+        
+        row2_layout.addWidget(QLabel("内容语言:"))
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("中文", LanguageCode.CHINESE)
+        self.language_combo.addItem("English", LanguageCode.ENGLISH)
+        self.language_combo.setToolTip("选择内容语言")
+        self.language_combo.currentIndexChanged.connect(self.on_language_changed)
+        row2_layout.addWidget(self.language_combo)
+        row2_layout.addStretch()
+
+        config_layout.addLayout(row2_layout)
+        
+        left_layout.addLayout(config_layout)
         
         # 恢复上次选择的风格
         self.restore_style_selection()
@@ -183,6 +318,13 @@ class StoryboardTab(QWidget):
         self.stop_generate_btn.setToolTip("停止当前的分镜生成任务")
         self.stop_generate_btn.setEnabled(False)  # 初始状态为禁用
         button_layout.addWidget(self.stop_generate_btn)
+        
+        # 添加双语对照按钮
+        self.bilingual_btn = QPushButton("查看双语对照")
+        self.bilingual_btn.clicked.connect(self.show_bilingual_content)
+        self.bilingual_btn.setToolTip("查看中英文内容对照")
+        self.bilingual_btn.setEnabled(False)  # 初始状态为禁用
+        button_layout.addWidget(self.bilingual_btn)
         
         right_layout.addLayout(button_layout)
         
@@ -273,6 +415,17 @@ class StoryboardTab(QWidget):
         layout.addWidget(storyboard_splitter)
         self.setLayout(layout)
         
+    def show_bilingual_content(self):
+        """显示双语内容对照"""
+        if self.chinese_content or self.english_content:
+            dialog = BilingualTextDialog(
+                self.chinese_content, 
+                self.english_content, 
+                "双语内容对照",
+                self
+            )
+            dialog.exec_()
+    
     def load_rewritten_text_from_main(self):
         """从主窗口加载已改写的文本"""
         try:
@@ -295,6 +448,168 @@ class StoryboardTab(QWidget):
         except Exception as e:
             logger.error(f"加载改写文本失败: {e}")
             return False
+    
+    def _has_unsaved_content(self) -> bool:
+        """检查是否有未保存的内容"""
+        try:
+            # 检查文本输入框是否有内容
+            if self.text_input.toPlainText().strip():
+                return True
+            
+            # 检查输出文本框是否有内容
+            if self.output_text.toPlainText().strip():
+                return True
+            
+            # 检查是否有正在进行的生成任务
+            if self.is_generating:
+                return True
+                
+            return False
+        except Exception as e:
+            logger.error(f"检查未保存内容时出错: {e}")
+            return False
+    
+    def _get_skip_confirmation_setting(self) -> bool:
+        """获取跳过确认对话框的设置"""
+        try:
+            return self.config_manager.get_setting('language_switch_skip_confirmation', False)
+        except Exception as e:
+            logger.error(f"获取跳过确认设置时出错: {e}")
+            return False
+    
+    def _set_skip_confirmation_setting(self, skip: bool):
+        """设置跳过确认对话框的选项"""
+        try:
+            self.config_manager.set_setting('language_switch_skip_confirmation', skip)
+            logger.info(f"语言切换确认设置已更新: skip={skip}")
+        except Exception as e:
+            logger.error(f"设置跳过确认选项时出错: {e}")
+    
+    def _set_language_combo_value(self, language: LanguageCode):
+        """设置语言下拉框的值"""
+        try:
+            for i in range(self.language_combo.count()):
+                if self.language_combo.itemData(i) == language:
+                    self.language_combo.setCurrentIndex(i)
+                    break
+        except Exception as e:
+            logger.error(f"设置语言下拉框值时出错: {e}")
+    
+    def _perform_language_switch(self, new_language: LanguageCode):
+        """执行语言切换"""
+        try:
+            self.language_switch_in_progress = True
+            
+            # 更新语言管理器
+            success = self.language_manager.set_language(new_language)
+            if not success:
+                logger.error(f"语言管理器切换失败: {new_language.value}")
+                self._set_language_combo_value(self.language_manager.current_language)
+                return
+            
+            # 更新项目语言设置
+            self._update_project_language_settings(new_language)
+            
+            # 更新界面提示信息
+            self._update_ui_language_hints(new_language)
+            
+            # 清空双语内容缓存（因为语言已切换）
+            self.chinese_content = ""
+            self.english_content = ""
+            self.bilingual_btn.setEnabled(False)
+            
+            # 重置LLM API（因为可能需要不同的提示词模板）
+            self.llm_api = None
+            
+            logger.info(f"语言切换完成: {new_language.value}")
+            
+        except Exception as e:
+            logger.error(f"执行语言切换时出错: {e}")
+        finally:
+            self.language_switch_in_progress = False
+    
+    def _update_project_language_settings(self, language: LanguageCode):
+        """更新项目语言设置"""
+        try:
+            if self.project_manager and self.project_manager.current_project:
+                project_data = self.project_manager.current_project
+                if 'language_settings' not in project_data:
+                    from src.models.language_models import ProjectLanguageSettings
+                    default_settings = ProjectLanguageSettings(
+                        primary_language=LanguageCode.CHINESE,
+                        content_language=LanguageCode.CHINESE,
+                        voice_language=LanguageCode.CHINESE,
+                        subtitle_language=LanguageCode.CHINESE
+                    )
+                    project_data['language_settings'] = default_settings.to_dict()
+                
+                # 更新内容语言
+                project_data['language_settings']['content_language'] = language.value
+                project_data['language_settings']['updated_at'] = datetime.now().isoformat()
+                
+                # 保存项目
+                if self.current_project_name:
+                    self.project_manager.save_project(self.current_project_name, project_data)
+                    logger.debug(f"项目语言设置已更新: {language.value}")
+        except Exception as e:
+            logger.error(f"更新项目语言设置时出错: {e}")
+    
+    def _update_ui_language_hints(self, language: LanguageCode):
+        """更新界面提示信息"""
+        try:
+            if language == LanguageCode.CHINESE:
+                # 中文提示
+                self.text_input.setPlaceholderText(
+                    "此处将自动显示第一个标签页改写后的文本内容，\n您也可以在此输入或编辑自定义文本..."
+                )
+                self.output_text.setPlaceholderText("显示大模型输出的分镜/脚本/描述")
+                self.generate_shots_btn.setText("生成分镜")
+                self.stop_generate_btn.setText("停止生成")
+                self.bilingual_btn.setText("查看双语对照")
+                
+                # 更新工具提示
+                self.text_input.setToolTip("显示第一个标签页改写后的文本内容，或输入自定义文本进行分镜生成")
+                self.output_text.setToolTip("显示大模型输出的分镜/脚本/描述")
+                self.generate_shots_btn.setToolTip("根据大模型输出生成分镜表")
+                self.stop_generate_btn.setToolTip("停止当前的分镜生成任务")
+                self.bilingual_btn.setToolTip("查看中英文内容对照")
+                
+            elif language == LanguageCode.ENGLISH:
+                # 英文提示
+                self.text_input.setPlaceholderText(
+                    "The rewritten text from the first tab will be displayed here automatically,\n"
+                    "or you can input/edit custom text..."
+                )
+                self.output_text.setPlaceholderText("Display storyboard/script/description output from LLM")
+                self.generate_shots_btn.setText("Generate Storyboard")
+                self.stop_generate_btn.setText("Stop Generation")
+                self.bilingual_btn.setText("View Bilingual Content")
+                
+                # 更新工具提示
+                self.text_input.setToolTip("Display rewritten text from the first tab, or input custom text for storyboard generation")
+                self.output_text.setToolTip("Display storyboard/script/description output from LLM")
+                self.generate_shots_btn.setToolTip("Generate storyboard table based on LLM output")
+                self.stop_generate_btn.setToolTip("Stop current storyboard generation task")
+                self.bilingual_btn.setToolTip("View Chinese-English content comparison")
+                
+        except Exception as e:
+            logger.error(f"更新界面提示信息时出错: {e}")
+    
+    def on_language_manager_changed(self, new_language: LanguageCode):
+        """语言管理器语言变更回调"""
+        try:
+            if not self.language_switch_in_progress:
+                # 同步更新下拉框选择
+                self.language_switch_in_progress = True
+                self._set_language_combo_value(new_language)
+                self.language_switch_in_progress = False
+                
+                # 更新界面提示
+                self._update_ui_language_hints(new_language)
+                
+            logger.debug(f"语言管理器回调: {new_language.value}")
+        except Exception as e:
+            logger.error(f"处理语言管理器变更回调时出错: {e}")
     
 
     
@@ -321,6 +636,23 @@ class StoryboardTab(QWidget):
                     QMessageBox.warning(self, "警告", "请先输入文本内容或在第一个标签页完成文本改写")
                     return
                 input_text = self.text_input.toPlainText().strip()
+            
+            # 获取当前选择的语言
+            current_language = self.language_combo.itemData(self.language_combo.currentIndex())
+            
+            # 如果是英文，尝试生成对应的中文内容用于对照
+            if current_language == LanguageCode.ENGLISH:
+                # 这里应该调用翻译服务生成中文对照内容
+                # 为简化演示，我们只是简单地保存内容
+                self.english_content = input_text
+                self.chinese_content = "（需要翻译服务将英文内容翻译为中文）"
+            else:
+                # 中文内容，可以尝试生成英文翻译
+                self.chinese_content = input_text
+                self.english_content = "（需要翻译服务将中文内容翻译为英文）"
+            
+            # 启用双语对照按钮
+            self.bilingual_btn.setEnabled(True)
             
             # 设置生成状态
             self.is_generating = True

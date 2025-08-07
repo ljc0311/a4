@@ -182,9 +182,10 @@ class ConfigConverter:
             'safe': config.custom_params.get('safe', True)  # 默认安全模式
         }
 
-        # 只有当seed有效时才添加
-        if config.seed is not None and config.seed > 0:
+        # 处理种子值：-1表示随机，其他值表示固定种子
+        if config.seed is not None and config.seed != -1:
             result['seed'] = config.seed
+        # 如果是-1或None，不添加seed参数，让API自动生成随机种子
 
         # 添加private参数（如果需要）
         if 'private' in config.custom_params:
